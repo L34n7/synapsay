@@ -61,11 +61,7 @@ export default function Dashboard() {
   const [interactionMode, setInteractionMode] = useState<"voice" | "text">("voice");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
-  const [muted, setMuted] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.localStorage.getItem(MUTE_STORAGE_KEY) === "true",
-  );
+  const [muted, setMuted] = useState(false);
   const [energy, setEnergy] = useState(0.08);
   const [transcript, setTranscript] = useState("Estou pronta. Como posso ajudar você hoje?");
   const [clock, setClock] = useState("");
@@ -85,7 +81,7 @@ export default function Dashboard() {
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const frameRef = useRef<number | null>(null);
-  const mutedRef = useRef(muted);
+  const mutedRef = useRef(false);
   const connectedRef = useRef(false);
   const conversationIdRef = useRef<string | null>(null);
   const conversationPromiseRef = useRef<Promise<string> | null>(null);
@@ -99,6 +95,12 @@ export default function Dashboard() {
   const latestUserMessageIdRef = useRef<string | null>(null);
   const latestUserTranscriptRef = useRef("");
   const connectionAttemptRef = useRef(0);
+
+  useEffect(() => {
+    const savedMute = window.localStorage.getItem(MUTE_STORAGE_KEY) === "true";
+    mutedRef.current = savedMute;
+    setMuted(savedMute);
+  }, []);
 
   const attachAnalyser = useCallback(
     (context: AudioContext, stream: MediaStream, target: "mic" | "output") => {
