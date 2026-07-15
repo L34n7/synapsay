@@ -489,7 +489,7 @@ export default function Dashboard() {
       setVoiceState("muted");
       setTranscript(
         data.insertedCount
-          ? `${data.insertedCount} memória(s) aguardando sua revisão.`
+          ? `${data.insertedCount} memória(s) sincronizada(s) automaticamente.`
           : "Conversa analisada. Nenhuma nova memória útil foi encontrada.",
       );
       window.setTimeout(() => {
