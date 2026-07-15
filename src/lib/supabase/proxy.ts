@@ -38,6 +38,7 @@ export async function updateSession(request: NextRequest) {
     (path.startsWith("/dashboard") ||
       path.startsWith("/memorias") ||
       path.startsWith("/historico") ||
+      path.startsWith("/agenda") ||
       path === "/redefinir-senha") &&
     !authenticated
   ) {

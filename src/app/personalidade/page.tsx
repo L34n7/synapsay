@@ -139,7 +139,7 @@ export default function PersonalityPage() {
 
       <header className={styles.header}>
         <a href="/dashboard" className={styles.brand}><span>S</span>synap<b>say</b></a>
-        <nav><a href="/dashboard">ASSISTENTE</a><a href="/memorias">MEMÓRIAS</a><a href="/historico">HISTÓRICO</a><i /> PERFIL SINCRONIZADO</nav>
+        <nav><a href="/dashboard">ASSISTENTE</a><a href="/memorias">MEMÓRIAS</a><a href="/agenda">AGENDA</a><a href="/historico">HISTÓRICO</a><i /> PERFIL SINCRONIZADO</nav>
       </header>
 
       <section className={styles.shell}>
