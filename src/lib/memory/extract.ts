@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { AI_MODELS } from "@/lib/ai/models";
 import { createHash } from "node:crypto";
 import {
   createMemoryDedupeKey,
@@ -189,7 +190,7 @@ export async function extractMemories({
     .join("\n")
     .slice(0, 18_000);
 
-  const model = process.env.OPENAI_MEMORY_MODEL ?? "gpt-5-mini";
+  const model = AI_MODELS.memoryBrain;
   const safetyIdentifier = createHash("sha256").update(userId).digest("hex");
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
