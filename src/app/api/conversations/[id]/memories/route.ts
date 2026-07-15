@@ -90,7 +90,7 @@ export async function POST(_request: Request, context: RouteContext) {
       source: "conversation",
       importance: memory.importance,
       status: "active",
-      review_status: "pending",
+      review_status: "approved",
       memory_type: memory.memoryType,
       expires_at: memory.expiresAt,
       dedupe_key: memory.dedupeKey,
