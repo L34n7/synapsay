@@ -23,6 +23,8 @@ Após cada fala do usuário, o cérebro de memória analisa a conversa em segund
 
 O histórico está disponível em `/historico`. Conversas finalizadas recebem um título automático, podem ser pesquisadas por título ou conteúdo, e podem ser retomadas com as últimas mensagens como contexto. Conversas sem atividade por 30 minutos são encerradas quando o histórico é sincronizado.
 
+A Synapsay também possui busca global de histórico. Pedidos como **“lembra disso?”**, **“eu falei sobre isso?”** e **“traga mais mensagens antes/depois”** são interpretados pela IA. A busca retorna trechos apenas das conversas do usuário autenticado, com âncoras para expansão progressiva. Quando nada é encontrado, a assistente informa isso sem inventar lembranças.
+
 No dashboard, o seletor **Voz / Texto** mantém os dois canais na mesma conversa. O chat por texto usa streaming, permite interromper e copiar respostas, e reutiliza o mesmo identificador ao tentar novamente para evitar mensagens duplicadas. Essa etapa depende de `202607130005_text_chat.sql`.
 
 ## Getting Started
