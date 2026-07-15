@@ -10,15 +10,16 @@ Variáveis necessárias em `.env.local`:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 OPENAI_API_KEY=
-# Opcional. O padrão do extrator de memórias é gpt-5-mini.
-OPENAI_MEMORY_MODEL=gpt-5-mini
-# Opcional. O padrão do chat por texto também é gpt-5-mini.
-OPENAI_TEXT_MODEL=gpt-5-mini
+# Opcional. Modelos padrão da Synapsay.
+OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
+OPENAI_TEXT_MODEL=gpt-5.6-luna
+OPENAI_MEMORY_MODEL=gpt-5.6-luna
+OPENAI_MEMORY_CONFLICT_MODEL=gpt-5.6-luna
 ```
 
 No Supabase, aplique em ordem os arquivos da pasta `supabase/migrations`. A etapa de memória depende de `202607130003_memory_engine.sql`; o histórico avançado e a retomada de conversas dependem de `202607130004_conversation_history.sql`.
 
-As memórias extraídas de conversas começam como pendentes. Apenas memórias aprovadas e ativas são adicionadas ao contexto da conversa de voz; o botão **Esquecer** remove a memória permanentemente.
+Após cada fala do usuário, o cérebro de memória analisa a conversa em segundo plano e salva automaticamente apenas fatos úteis. Memórias ativas entram no contexto das próximas conversas; o botão **Esquecer** remove a memória permanentemente.
 
 O histórico está disponível em `/historico`. Conversas finalizadas recebem um título automático, podem ser pesquisadas por título ou conteúdo, e podem ser retomadas com as últimas mensagens como contexto. Conversas sem atividade por 30 minutos são encerradas quando o histórico é sincronizado.
 
