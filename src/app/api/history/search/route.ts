@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import {
   searchConversationHistory,
   type HistoryDirection,
+  type HistoryScope,
 } from "@/lib/history/search";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,6 +26,10 @@ export async function POST(request: Request) {
     anchorMessageId?: unknown;
     window?: unknown;
     currentConversationId?: unknown;
+    excludeMessageId?: unknown;
+    scope?: unknown;
+    from?: unknown;
+    to?: unknown;
   } | null;
 
   const query = typeof body?.query === "string" ? body.query.trim() : "";
@@ -37,11 +43,27 @@ export async function POST(request: Request) {
     UUID_PATTERN.test(body.anchorMessageId)
       ? body.anchorMessageId
       : null;
+  const excludeMessageId =
+    typeof body?.excludeMessageId === "string" &&
+    UUID_PATTERN.test(body.excludeMessageId)
+      ? body.excludeMessageId
+      : null;
   const currentConversationId =
     typeof body?.currentConversationId === "string" &&
     UUID_PATTERN.test(body.currentConversationId)
       ? body.currentConversationId
       : null;
+  const scope: HistoryScope = ["current", "global"].includes(
+    String(body?.scope),
+  )
+    ? (body?.scope as HistoryScope)
+    : "all";
+  const safeDate = (value: unknown) =>
+    typeof value === "string" && !Number.isNaN(new Date(value).getTime())
+      ? new Date(value).toISOString()
+      : null;
+  const from = safeDate(body?.from);
+  const to = safeDate(body?.to);
   const window = Math.min(20, Math.max(2, Number(body?.window) || 4));
 
   if (!anchorMessageId && (!query || query.length > 300)) {
@@ -56,9 +78,13 @@ export async function POST(request: Request) {
     userId,
     query,
     direction,
+    scope,
     anchorMessageId,
     window,
-    excludeConversationId: anchorMessageId ? null : currentConversationId,
+    currentConversationId,
+    excludeMessageId,
+    from,
+    to,
   });
 
   return NextResponse.json(result, {

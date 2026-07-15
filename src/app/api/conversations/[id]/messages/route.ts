@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
+import { embedHistoryMessage } from "@/lib/history/embeddings";
 import { createClient } from "@/lib/supabase/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -143,6 +147,15 @@ export async function POST(request: Request, context: RouteContext) {
       },
       { status: 500 },
     );
+  }
+
+  if (data?.id) {
+    await embedHistoryMessage({
+      supabase,
+      userId,
+      messageId: data.id,
+      content,
+    });
   }
 
   const { data: conversation } = await supabase

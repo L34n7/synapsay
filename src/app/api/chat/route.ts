@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { AI_MODELS } from "@/lib/ai/models";
+import { embedHistoryMessage } from "@/lib/history/embeddings";
 import { interpretHistoryIntent } from "@/lib/history/intent";
 import {
   formatHistoryForModel,
@@ -146,6 +147,13 @@ export async function POST(request: Request) {
     userMessageId = userMessage.id;
   }
 
+  await embedHistoryMessage({
+    supabase,
+    userId,
+    messageId: userMessageId,
+    content,
+  });
+
   let assistantMessageId = existingAssistant?.id ?? null;
   if (assistantMessageId) {
     const { error } = await supabase
@@ -289,11 +297,13 @@ export async function POST(request: Request) {
       userId,
       query: historyIntent.query,
       direction: historyIntent.direction,
+      scope: historyIntent.scope,
       anchorMessageId: historyIntent.anchorMessageId,
       window: historyIntent.window,
-      excludeConversationId: historyIntent.anchorMessageId
-        ? null
-        : conversationId,
+      currentConversationId: conversationId,
+      excludeMessageId: userMessageId,
+      from: historyIntent.from,
+      to: historyIntent.to,
     });
   }
 
@@ -305,6 +315,7 @@ export async function POST(request: Request) {
         query: historySearch.query,
         found: historySearch.found,
         direction: historySearch.direction,
+        scope: historySearch.scope,
         excerpts: historySearch.excerpts.map((excerpt) => ({
           conversationId: excerpt.conversationId,
           conversationTitle: excerpt.conversationTitle,
@@ -475,6 +486,15 @@ export async function POST(request: Request) {
         })
         .eq("id", assistantMessageId)
         .eq("user_id", userId);
+
+      if (assistantMessageId && assistantText.trim()) {
+        await embedHistoryMessage({
+          supabase,
+          userId,
+          messageId: assistantMessageId,
+          content: fallbackContent,
+        });
+      }
 
       await supabase
         .from("conversations")

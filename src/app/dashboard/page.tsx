@@ -28,7 +28,7 @@ type RealtimeEvent = {
   text?: string;
   delta?: string;
   item?: { content?: Array<{ transcript?: string; text?: string }> };
-  response?: { output?: RealtimeFunctionCall[] };
+  response?: { id?: string; output?: RealtimeFunctionCall[] };
 };
 
 const UUID_PATTERN =
@@ -87,6 +87,12 @@ export default function Dashboard() {
   const savedEventsRef = useRef(new Set<string>());
   const pendingSavesRef = useRef(new Set<Promise<void>>());
   const assistantTranscriptRef = useRef("");
+  const pendingAssistantTranscriptRef = useRef<{
+    content: string;
+    eventId: string;
+  } | null>(null);
+  const latestUserMessageIdRef = useRef<string | null>(null);
+  const latestUserTranscriptRef = useRef("");
   const connectionAttemptRef = useRef(0);
 
   const attachAnalyser = useCallback(
@@ -183,9 +189,15 @@ export default function Dashboard() {
               }),
             },
           );
+          const data = (await response.json().catch(() => null)) as {
+            error?: string;
+            message?: { id?: string } | null;
+          } | null;
           if (!response.ok) {
-            const data = await response.json().catch(() => null);
             throw new Error(data?.error ?? "Falha ao salvar a mensagem.");
+          }
+          if (role === "user" && data?.message?.id) {
+            latestUserMessageIdRef.current = data.message.id;
           }
           setHistoryStatus("saved");
 
@@ -240,8 +252,11 @@ export default function Dashboard() {
       let args: {
         query?: string;
         direction?: "around" | "before" | "after";
+        scope?: "current" | "global" | "all";
         anchor_message_id?: string | null;
         window?: number;
+        from?: string | null;
+        to?: string | null;
       } = {};
       try {
         args = JSON.parse(call.arguments || "{}");
@@ -253,16 +268,31 @@ export default function Dashboard() {
 
       let output: unknown;
       try {
+        await Promise.allSettled([...pendingSavesRef.current]);
         const currentConversationId = await ensureConversation();
+        const latestRequest = latestUserTranscriptRef.current
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase();
+        const scope =
+          /(?:agora ha pouco|nesta conversa|nessa conversa|alguns? minutos?|minutos? atras)/.test(
+            latestRequest,
+          )
+            ? "current"
+            : (args.scope ?? "all");
         const response = await fetch("/api/history/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query: args.query ?? "",
             direction: args.direction ?? "around",
+            scope,
             anchorMessageId: args.anchor_message_id ?? null,
             window: args.window ?? 4,
             currentConversationId,
+            excludeMessageId: latestUserMessageIdRef.current,
+            from: args.from ?? null,
+            to: args.to ?? null,
           }),
         });
         output = await response.json();
@@ -300,6 +330,7 @@ export default function Dashboard() {
     (data: RealtimeEvent) => {
       if (data.type === "response.created") {
         assistantTranscriptRef.current = "";
+        pendingAssistantTranscriptRef.current = null;
         return;
       }
 
@@ -310,9 +341,19 @@ export default function Dashboard() {
             item.name === "search_conversation_history",
         );
         if (calls.length) {
+          pendingAssistantTranscriptRef.current = null;
+          assistantTranscriptRef.current = "";
           calls.forEach((call) => void executeHistorySearch(call));
           return;
         }
+
+        const pending = pendingAssistantTranscriptRef.current;
+        if (pending) {
+          void saveMessage("assistant", pending.content, pending.eventId);
+          pendingAssistantTranscriptRef.current = null;
+        }
+        assistantTranscriptRef.current = "";
+        return;
       }
 
       if (
@@ -321,6 +362,7 @@ export default function Dashboard() {
       ) {
         const finalTranscript = data.transcript.trim();
         if (finalTranscript) {
+          latestUserTranscriptRef.current = finalTranscript;
           setTranscript(`Você: ${finalTranscript}`);
           void saveMessage(
             "user",
@@ -345,23 +387,20 @@ export default function Dashboard() {
           data.transcript?.trim() || assistantTranscriptRef.current.trim();
         if (finalTranscript) {
           setTranscript(finalTranscript);
-          void saveMessage(
-            "assistant",
-            finalTranscript,
-            `assistant:${data.item_id ?? data.response_id ?? crypto.randomUUID()}`,
-          );
+          pendingAssistantTranscriptRef.current = {
+            content: finalTranscript,
+            eventId: `assistant:${data.item_id ?? data.response_id ?? crypto.randomUUID()}`,
+          };
         }
-        assistantTranscriptRef.current = "";
         return;
       }
 
       if (data.type === "response.output_text.done" && data.text?.trim()) {
         setTranscript(data.text.trim());
-        void saveMessage(
-          "assistant",
-          data.text,
-          `assistant:${data.item_id ?? data.response_id ?? crypto.randomUUID()}`,
-        );
+        pendingAssistantTranscriptRef.current = {
+          content: data.text.trim(),
+          eventId: `assistant:${data.item_id ?? data.response_id ?? crypto.randomUUID()}`,
+        };
       }
     },
     [executeHistorySearch, saveMessage],
@@ -503,6 +542,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     const connectTimer = window.setTimeout(() => void connect(), 0);
+    void fetch("/api/history/backfill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    }).catch(() => {
+      // O histórico literal continua funcionando se o backfill estiver indisponível.
+    });
     const updateClock = () =>
       setClock(
         new Intl.DateTimeFormat("pt-BR", {

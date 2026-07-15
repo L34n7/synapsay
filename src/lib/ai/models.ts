@@ -10,4 +10,6 @@ export const AI_MODELS = {
   memoryBrain: process.env.OPENAI_MEMORY_MODEL ?? "gpt-5.6-luna",
   memoryConflict:
     process.env.OPENAI_MEMORY_CONFLICT_MODEL ?? "gpt-5.6-luna",
+  embedding:
+    process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
 } as const;
