@@ -10,6 +10,9 @@ export type HistoryIntent = {
   window: number;
 };
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 type ResponsesPayload = {
   output?: Array<{
     content?: Array<{ type?: string; text?: string }>;
@@ -147,7 +150,8 @@ export async function interpretHistoryIntent({
       query: typeof parsed.query === "string" ? parsed.query.trim().slice(0, 300) : "",
       direction,
       anchorMessageId:
-        typeof parsed.anchor_message_id === "string"
+        typeof parsed.anchor_message_id === "string" &&
+        UUID_PATTERN.test(parsed.anchor_message_id)
           ? parsed.anchor_message_id
           : null,
       window: Math.min(20, Math.max(2, Number(parsed.window) || 4)),
