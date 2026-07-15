@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import styles from "./page.module.css";
 
@@ -21,6 +23,7 @@ function LockIcon() {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +31,19 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ok: boolean; text: string} | null>(null);
   const [eyebrow, title, description, submitText] = content[mode];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const errorCode = new URLSearchParams(window.location.search).get("erro");
+      if (errorCode === "sessao_expirada") {
+        setMessage({ ok: false, text: "Sua sessão expirou. Entre novamente." });
+      }
+      if (errorCode === "confirmacao_invalida") {
+        setMessage({ ok: false, text: "O link expirou ou já foi utilizado." });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   function changeMode(next: Mode) {
     setMode(next);
@@ -44,15 +60,29 @@ export default function Home() {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        window.location.href = "/dashboard";
+        router.replace("/dashboard");
+        router.refresh();
         return;
       }
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}/auth/callback` } });
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
+        });
         if (error) throw error;
+        if (data.session) {
+          router.replace("/dashboard");
+          router.refresh();
+          return;
+        }
         setMessage({ ok: true, text: "Conta criada! Confira seu e-mail para confirmar o acesso." });
       } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/redefinir-senha` });
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/auth/callback?next=/redefinir-senha`,
+        });
         if (error) throw error;
         setMessage({ ok: true, text: "Link enviado. Confira sua caixa de entrada." });
       }
@@ -62,6 +92,8 @@ export default function Home() {
         "Invalid login credentials": "E-mail ou senha incorretos.",
         "User already registered": "Este e-mail já está cadastrado.",
         "Password should be at least 6 characters": "A senha deve ter pelo menos 6 caracteres.",
+        "Email not confirmed": "Confirme seu e-mail antes de entrar.",
+        "For security purposes, you can only request this after": "Aguarde alguns segundos antes de tentar novamente.",
       };
       setMessage({ ok: false, text: translated[raw] ?? raw });
     } finally {
@@ -73,7 +105,7 @@ export default function Home() {
     <main className={styles.page}>
       <div className={styles.ambient}/><div className={styles.grid}/>
       <header className={styles.header}>
-        <a className={styles.brand} href="/" aria-label="Synapsay"><i className={styles.logo}>•••</i><b>synap<span>say</span></b></a>
+        <Link className={styles.brand} href="/" aria-label="Synapsay"><i className={styles.logo}>•••</i><b>synap<span>say</span></b></Link>
         <div className={styles.status}><i/> SISTEMA ONLINE</div>
       </header>
 

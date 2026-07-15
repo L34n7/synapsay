@@ -1,4 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Synapsay
+
+Assistente pessoal por voz com autenticação, histórico e memória controlada pelo usuário.
+
+## Configuração
+
+Variáveis necessárias em `.env.local`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+OPENAI_API_KEY=
+# Opcional. O padrão do extrator de memórias é gpt-5-mini.
+OPENAI_MEMORY_MODEL=gpt-5-mini
+# Opcional. O padrão do chat por texto também é gpt-5-mini.
+OPENAI_TEXT_MODEL=gpt-5-mini
+```
+
+No Supabase, aplique em ordem os arquivos da pasta `supabase/migrations`. A etapa de memória depende de `202607130003_memory_engine.sql`; o histórico avançado e a retomada de conversas dependem de `202607130004_conversation_history.sql`.
+
+As memórias extraídas de conversas começam como pendentes. Apenas memórias aprovadas e ativas são adicionadas ao contexto da conversa de voz; o botão **Esquecer** remove a memória permanentemente.
+
+O histórico está disponível em `/historico`. Conversas finalizadas recebem um título automático, podem ser pesquisadas por título ou conteúdo, e podem ser retomadas com as últimas mensagens como contexto. Conversas sem atividade por 30 minutos são encerradas quando o histórico é sincronizado.
+
+No dashboard, o seletor **Voz / Texto** mantém os dois canais na mesma conversa. O chat por texto usa streaming, permite interromper e copiar respostas, e reutiliza o mesmo identificador ao tentar novamente para evitar mensagens duplicadas. Essa etapa depende de `202607130005_text_chat.sql`.
 
 ## Getting Started
 
