@@ -97,9 +97,12 @@ export default function Dashboard() {
   const connectionAttemptRef = useRef(0);
 
   useEffect(() => {
-    const savedMute = window.localStorage.getItem(MUTE_STORAGE_KEY) === "true";
-    mutedRef.current = savedMute;
-    setMuted(savedMute);
+    const timer = window.setTimeout(() => {
+      const savedMute = window.localStorage.getItem(MUTE_STORAGE_KEY) === "true";
+      mutedRef.current = savedMute;
+      setMuted(savedMute);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const attachAnalyser = useCallback(
@@ -327,7 +330,72 @@ export default function Dashboard() {
           },
         }),
       );
-      channel.send(JSON.stringify({ type: "response.create" }));
+      return true;
+    },
+    [ensureConversation],
+  );
+
+  const executeTaskAssistant = useCallback(
+    async (call: RealtimeFunctionCall) => {
+      const channel = dataChannelRef.current;
+      if (
+        !channel ||
+        channel.readyState !== "open" ||
+        call.name !== "manage_tasks" ||
+        !call.call_id
+      ) {
+        return false;
+      }
+
+      let message = latestUserTranscriptRef.current;
+      try {
+        const args = JSON.parse(call.arguments || "{}") as { message?: string };
+        message = args.message?.trim() || message;
+      } catch {
+        // A transcrição atual é uma alternativa segura para argumentos inválidos.
+      }
+
+      setTranscript("Certo, estou organizando sua agenda.");
+      let output: unknown;
+      try {
+        await Promise.allSettled([...pendingSavesRef.current]);
+        const currentConversationId = await ensureConversation();
+        const response = await fetch("/api/tasks/assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: currentConversationId,
+            sourceMessageId: latestUserMessageIdRef.current,
+            message,
+          }),
+        });
+        output = await response.json();
+        if (!response.ok) {
+          output = {
+            success: false,
+            error:
+              (output as { error?: string })?.error ??
+              "Não foi possível atualizar a agenda.",
+          };
+        }
+      } catch {
+        output = {
+          success: false,
+          error: "Não foi possível atualizar a agenda agora.",
+        };
+      }
+
+      channel.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: call.call_id,
+            output: JSON.stringify(output),
+          },
+        }),
+      );
+      return true;
     },
     [ensureConversation],
   );
@@ -344,12 +412,23 @@ export default function Dashboard() {
         const calls = (data.response?.output ?? []).filter(
           (item) =>
             item.type === "function_call" &&
-            item.name === "search_conversation_history",
+            ["search_conversation_history", "manage_tasks"].includes(item.name ?? ""),
         );
         if (calls.length) {
           pendingAssistantTranscriptRef.current = null;
           assistantTranscriptRef.current = "";
-          calls.forEach((call) => void executeHistorySearch(call));
+          void Promise.all(
+            calls.map((call) =>
+              call.name === "manage_tasks"
+                ? executeTaskAssistant(call)
+                : executeHistorySearch(call),
+            ),
+          ).then(() => {
+            const channel = dataChannelRef.current;
+            if (channel?.readyState === "open") {
+              channel.send(JSON.stringify({ type: "response.create" }));
+            }
+          });
           return;
         }
 
@@ -409,7 +488,7 @@ export default function Dashboard() {
         };
       }
     },
-    [executeHistorySearch, saveMessage],
+    [executeHistorySearch, executeTaskAssistant, saveMessage],
   );
 
   const connect = useCallback(async () => {
@@ -502,6 +581,17 @@ export default function Dashboard() {
       channel.onopen = () => {
         connectedRef.current = true;
         setVoiceState(mutedRef.current ? "muted" : "listening");
+        if (typeof tokenData.startupBriefing === "string" && tokenData.startupBriefing) {
+          channel.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                output_modalities: ["audio"],
+                instructions: tokenData.startupBriefing,
+              },
+            }),
+          );
+        }
         window.setTimeout(() => {
           void fetch("/api/history/backfill", {
             method: "POST",
@@ -690,6 +780,7 @@ export default function Dashboard() {
           <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9M12 7a5 5 0 1 0 5 5M12 11a1 1 0 1 0 1 1" /></svg>
         </button>
         <a href="/memorias" aria-label="Memórias"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h6M8 16h4" /></svg></a>
+        <a href="/agenda" aria-label="Agenda"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 2v4M16 2v4M5 9h14M8 13h3M13 13h3M8 17h3" /></svg></a>
         <a href="/historico" aria-label="Histórico"><svg viewBox="0 0 24 24"><path d="M4 17l5-5 3 3 7-8M15 7h4v4" /></svg></a>
         <span />
         <button aria-label="Configurações"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.7-1L14.3 3h-4.6l-.4 3a8 8 0 0 0-1.7 1L5 6 3 9.4 5.1 11a7 7 0 0 0 0 2L3 14.6 5 18l2.6-1a8 8 0 0 0 1.7 1l.4 3h4.6l.4-3a8 8 0 0 0 1.7-1l2.6 1 2-3.4-2.1-1.6a7 7 0 0 0 .1-1Z"/></svg></button>

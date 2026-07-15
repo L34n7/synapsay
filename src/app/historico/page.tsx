@@ -255,6 +255,7 @@ export default function HistoryPage() {
         <nav>
           <a href="/dashboard">ASSISTENTE</a>
           <a href="/memorias">MEMÓRIAS</a>
+          <a href="/agenda">AGENDA</a>
           <span><i /> HISTÓRICO ONLINE</span>
         </nav>
       </header>

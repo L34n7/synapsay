@@ -219,6 +219,7 @@ export default function MemoriesPage() {
         </a>
         <div className={styles.headerActions}>
           <span><i /> MEMÓRIA ONLINE</span>
+          <a href="/agenda">AGENDA</a>
           <a href="/historico">HISTÓRICO</a>
           <a href="/dashboard">VOLTAR AO NÚCLEO</a>
         </div>

@@ -1,0 +1,6 @@
+.stack { width:min(390px,calc(100vw - 28px)); position:fixed; z-index:1000; right:18px; bottom:18px; display:flex; flex-direction:column; gap:10px; }
+.toast { padding:17px; display:grid; grid-template-columns:9px 1fr 24px; gap:12px; color:#f5f3ff; border:1px solid rgba(77,232,255,.23); border-radius:13px; background:rgba(11,12,21,.96); box-shadow:0 20px 65px rgba(0,0,0,.45),0 0 28px rgba(77,232,255,.08); backdrop-filter:blur(20px); }
+.pulse { width:7px; height:7px; margin-top:4px; border-radius:50%; background:#43f5a0; box-shadow:0 0 12px #43f5a0; animation:pulse 1.8s ease-in-out infinite; }
+.toast span { color:#4de8ff; font:600 8px var(--font-geist-mono); letter-spacing:1.5px; }.toast strong{margin-top:6px;display:block;font-size:16px}.toast p{margin-top:6px;color:#8e899d;font-size:13px;line-height:1.45}.toast a{margin-top:10px;display:inline-block;color:#b9a3ff;font:600 8px var(--font-geist-mono);letter-spacing:1px}.toast button{width:24px;height:24px;color:#716d7d;border:0;background:transparent;cursor:pointer;font-size:21px}
+@keyframes pulse{50%{opacity:.35;transform:scale(.78)}}
+

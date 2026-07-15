@@ -9,6 +9,11 @@ import {
   type HistorySearchResult,
 } from "@/lib/history/search";
 import { createClient } from "@/lib/supabase/server";
+import {
+  analyzeAndApplyTaskMessage,
+  formatTaskBrainResult,
+  type TaskBrainResult,
+} from "@/lib/tasks/brain";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -153,6 +158,19 @@ export async function POST(request: Request) {
     messageId: userMessageId,
     content,
   });
+
+  let taskBrainResult: TaskBrainResult | null = null;
+  try {
+    taskBrainResult = await analyzeAndApplyTaskMessage({
+      supabase,
+      userId,
+      conversationId,
+      sourceMessageId: userMessageId,
+      currentMessage: content,
+    });
+  } catch (reason) {
+    console.warn("Agenda automática indisponível nesta mensagem:", reason);
+  }
 
   let assistantMessageId = existingAssistant?.id ?? null;
   if (assistantMessageId) {
@@ -369,6 +387,10 @@ export async function POST(request: Request) {
           : "Não há memórias aprovadas; não presuma informações pessoais.",
         historyContext ||
           "Nenhuma busca global foi necessária. Responda usando apenas a conversa atual e as memórias aprovadas.",
+        taskBrainResult
+          ? formatTaskBrainResult(taskBrainResult)
+          : "A agenda não pôde ser consultada nesta mensagem. Não confirme criação, alteração ou lembrete sem uma operação registrada.",
+        "Quando o usuário pedir para lembrar uma tarefa, nunca diga que você não consegue memorizar. Diferencie com naturalidade: a tarefa pode ser registrada imediatamente, mas um aviso exige horário. Se faltar horário, confirme apenas o que foi realmente registrado e pergunte quando deve avisar.",
       ].join("\n\n"),
       input,
     }),
