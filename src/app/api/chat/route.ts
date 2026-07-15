@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { AI_MODELS } from "@/lib/ai/models";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -282,7 +283,7 @@ export async function POST(request: Request) {
         .digest("hex"),
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_TEXT_MODEL ?? "gpt-5-mini",
+      model: AI_MODELS.text,
       store: false,
       stream: true,
       max_output_tokens: 3000,
