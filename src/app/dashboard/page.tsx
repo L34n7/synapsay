@@ -13,6 +13,13 @@ type VoiceState =
   | "muted"
   | "error";
 
+type RealtimeFunctionCall = {
+  type?: string;
+  name?: string;
+  call_id?: string;
+  arguments?: string;
+};
+
 type RealtimeEvent = {
   type?: string;
   item_id?: string;
@@ -21,6 +28,7 @@ type RealtimeEvent = {
   text?: string;
   delta?: string;
   item?: { content?: Array<{ transcript?: string; text?: string }> };
+  response?: { output?: RealtimeFunctionCall[] };
 };
 
 const UUID_PATTERN =
@@ -65,6 +73,7 @@ export default function Dashboard() {
   >("idle");
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
+  const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
@@ -216,11 +225,94 @@ export default function Dashboard() {
     [ensureConversation],
   );
 
+  const executeHistorySearch = useCallback(
+    async (call: RealtimeFunctionCall) => {
+      const channel = dataChannelRef.current;
+      if (
+        !channel ||
+        channel.readyState !== "open" ||
+        call.name !== "search_conversation_history" ||
+        !call.call_id
+      ) {
+        return;
+      }
+
+      let args: {
+        query?: string;
+        direction?: "around" | "before" | "after";
+        anchor_message_id?: string | null;
+        window?: number;
+      } = {};
+      try {
+        args = JSON.parse(call.arguments || "{}");
+      } catch {
+        args = {};
+      }
+
+      setTranscript("Hmm... só um minuto, deixa eu pensar.");
+
+      let output: unknown;
+      try {
+        const currentConversationId = await ensureConversation();
+        const response = await fetch("/api/history/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: args.query ?? "",
+            direction: args.direction ?? "around",
+            anchorMessageId: args.anchor_message_id ?? null,
+            window: args.window ?? 4,
+            currentConversationId,
+          }),
+        });
+        output = await response.json();
+        if (!response.ok) {
+          output = {
+            found: false,
+            error:
+              (output as { error?: string })?.error ??
+              "Não foi possível consultar o histórico.",
+          };
+        }
+      } catch {
+        output = {
+          found: false,
+          error: "Não foi possível consultar o histórico agora.",
+        };
+      }
+
+      channel.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: call.call_id,
+            output: JSON.stringify(output),
+          },
+        }),
+      );
+      channel.send(JSON.stringify({ type: "response.create" }));
+    },
+    [ensureConversation],
+  );
+
   const handleRealtimeEvent = useCallback(
     (data: RealtimeEvent) => {
       if (data.type === "response.created") {
         assistantTranscriptRef.current = "";
         return;
+      }
+
+      if (data.type === "response.done") {
+        const calls = (data.response?.output ?? []).filter(
+          (item) =>
+            item.type === "function_call" &&
+            item.name === "search_conversation_history",
+        );
+        if (calls.length) {
+          calls.forEach((call) => void executeHistorySearch(call));
+          return;
+        }
       }
 
       if (
@@ -272,7 +364,7 @@ export default function Dashboard() {
         );
       }
     },
-    [saveMessage],
+    [executeHistorySearch, saveMessage],
   );
 
   const connect = useCallback(async () => {
@@ -360,6 +452,7 @@ export default function Dashboard() {
       stream.getAudioTracks().forEach((track) => peer.addTrack(track, stream));
 
       const channel = peer.createDataChannel("oai-events");
+      dataChannelRef.current = channel;
       channel.onopen = () => {
         connectedRef.current = true;
         setVoiceState("listening");
@@ -426,6 +519,8 @@ export default function Dashboard() {
       window.clearInterval(clockTimer);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      dataChannelRef.current?.close();
+      dataChannelRef.current = null;
       peerRef.current?.close();
       void contextRef.current?.close();
     };
@@ -447,6 +542,8 @@ export default function Dashboard() {
     connectedRef.current = false;
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    dataChannelRef.current?.close();
+    dataChannelRef.current = null;
     peerRef.current?.close();
     void contextRef.current?.close();
   }
