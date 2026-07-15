@@ -41,7 +41,9 @@ as $$
     messages.role,
     messages.content,
     messages.created_at,
-    1 - (messages.embedding <=> query_embedding) as similarity
+    1 - (
+      messages.embedding OPERATOR(extensions.<=>) query_embedding
+    ) as similarity
   from public.messages
   where messages.user_id = (select auth.uid())
     and messages.embedding is not null
@@ -57,7 +59,7 @@ as $$
     and (exclude_message_id is null or messages.id <> exclude_message_id)
     and (filter_from is null or messages.created_at >= filter_from)
     and (filter_to is null or messages.created_at < filter_to)
-  order by messages.embedding <=> query_embedding
+  order by messages.embedding OPERATOR(extensions.<=>) query_embedding
   limit least(greatest(coalesce(match_count, 30), 1), 100);
 $$;
 
