@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { AI_MODELS } from "@/lib/ai/models";
 import { createHash } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 
@@ -118,7 +119,7 @@ export async function GET(request: Request) {
       body: JSON.stringify({
         session: {
           type: "realtime",
-          model: "gpt-realtime-2.1",
+          model: AI_MODELS.voice,
           instructions,
           audio: {
             input: {
