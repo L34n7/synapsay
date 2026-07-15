@@ -27,7 +27,7 @@ type Draft = {
   expiresAt: string;
 };
 
-type Filter = "pending" | "approved" | "archived" | "all";
+type Filter = "approved" | "archived" | "all";
 
 const categories = [
   "preference",
@@ -84,7 +84,7 @@ function memoryToDraft(memory: Memory): Draft {
 
 export default function MemoriesPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
-  const [filter, setFilter] = useState<Filter>("pending");
+  const [filter, setFilter] = useState<Filter>("approved");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -114,9 +114,6 @@ export default function MemoriesPage() {
 
   const counts = useMemo(
     () => ({
-      pending: memories.filter(
-        (memory) => memory.review_status === "pending" && memory.status === "active",
-      ).length,
       approved: memories.filter(
         (memory) => memory.review_status === "approved" && memory.status === "active",
       ).length,
@@ -127,11 +124,6 @@ export default function MemoriesPage() {
   );
 
   const visibleMemories = useMemo(() => {
-    if (filter === "pending") {
-      return memories.filter(
-        (memory) => memory.review_status === "pending" && memory.status === "active",
-      );
-    }
     if (filter === "approved") {
       return memories.filter(
         (memory) => memory.review_status === "approved" && memory.status === "active",
@@ -238,27 +230,26 @@ export default function MemoriesPage() {
             <span className={styles.eyebrow}>CAMADA COGNITIVA // 01</span>
             <h1>Memória <em>consciente</em></h1>
             <p>
-              A Synapsay só usa nas próximas conversas o que você aprovar aqui.
-              Você mantém o controle para editar, arquivar ou esquecer.
+              A Synapsay organiza automaticamente as informações importantes.
+              Aqui você pode editar, arquivar ou esquecer o que ela usa.
             </p>
           </div>
           <div className={styles.stats}>
             <div><strong>{counts.approved}</strong><span>ATIVAS</span></div>
-            <div><strong>{counts.pending}</strong><span>PARA REVISAR</span></div>
             <div><strong>{counts.archived}</strong><span>ARQUIVADAS</span></div>
+            <div><strong>{counts.all}</strong><span>NO TOTAL</span></div>
           </div>
         </div>
 
         <div className={styles.toolbar}>
           <nav aria-label="Filtros de memória">
-            {(["pending", "approved", "archived", "all"] as Filter[]).map(
+            {(["approved", "archived", "all"] as Filter[]).map(
               (item) => (
                 <button
                   key={item}
                   className={filter === item ? styles.activeFilter : ""}
                   onClick={() => setFilter(item)}
                 >
-                  {item === "pending" && "Para revisar"}
                   {item === "approved" && "Ativas"}
                   {item === "archived" && "Arquivadas"}
                   {item === "all" && "Todas"}
@@ -327,9 +318,7 @@ export default function MemoriesPage() {
                   <span
                     className={`${styles.review} ${styles[memory.review_status]}`}
                   >
-                    {memory.review_status === "pending" && "AGUARDANDO REVISÃO"}
-                    {memory.review_status === "approved" && "APROVADA"}
-                    {memory.review_status === "rejected" && "REJEITADA"}
+                    {memory.status === "active" ? "ATIVA" : "ARQUIVADA"}
                   </span>
                 </div>
                 <h2>{memory.title}</h2>
@@ -348,17 +337,6 @@ export default function MemoriesPage() {
                   ))}
                 </div>
                 <div className={styles.cardActions}>
-                  {memory.review_status === "pending" && memory.status === "active" && (
-                    <button
-                      className={styles.approve}
-                      disabled={busyId === memory.id}
-                      onClick={() =>
-                        void patchMemory(memory.id, { reviewStatus: "approved" })
-                      }
-                    >
-                      APROVAR
-                    </button>
-                  )}
                   {memory.status === "archived" ? (
                     <button
                       disabled={busyId === memory.id}

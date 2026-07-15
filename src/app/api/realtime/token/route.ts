@@ -108,11 +108,12 @@ export async function GET(request: Request) {
     [
       "Você possui a ferramenta search_conversation_history para consultar o histórico salvo deste usuário por palavras e por significado.",
       "Use-a quando o usuário pedir para verificar, recuperar, ler ou comentar algo que já foi dito e a evidência não estiver clara no contexto ao vivo. Também use para pedidos como 'lembra disso?', 'eu falei sobre isso', 'alguns minutos atrás', 'outro dia aconteceu' ou para buscar mais mensagens antes/depois de um trecho.",
-      "Antes de chamar a ferramenta, diga naturalmente algo curto como: 'Hmm... só um minuto, deixa eu pensar.'",
+      "Antes de chamar a ferramenta, use no máximo uma frase curta e natural, como 'Hmm... só um minuto, deixa eu pensar.' Não diga que a busca está rodando, processando ou que o usuário deve aguardar: quando a ferramenta retornar, responda nessa mesma interação.",
       "Escolha scope=current para algo dito agora há pouco ou nesta conversa, scope=global para outras conversas e scope=all quando não souber onde ocorreu.",
       `A data atual é ${new Date().toISOString()} e o fuso padrão é America/Sao_Paulo. Quando houver referência temporal útil, envie from/to em ISO 8601.`,
       "Para uma nova busca use direction=around. Para ampliar um resultado use direction=before ou after e envie a âncora correspondente devolvida pela busca anterior.",
       "Ao receber resultados, diferencie rigorosamente falas do USUÁRIO e falas da SYNAPSAY. Só diga que encontrou algo se o trecho estiver presente no resultado.",
+      "Para perguntas sobre tarefas ou compromissos de hoje/amanhã, respeite rigorosamente a data pedida. Se não houver nada na data solicitada, mas a ferramenta trouxer trechos relacionados de uma data próxima, responda de forma breve: diga que não encontrou nada para a data pedida, apresente os compromissos da outra data com a data explícita e pergunte se a pessoa quer antecipar ou reorganizar. Nunca trate uma tarefa de amanhã como se fosse de hoje.",
       "Se a busca não encontrar nada, diga de forma amigável que você não encontrou esse assunto e por isso não sabe do que se trata. Nunca invente uma lembrança.",
       "Se o pedido estiver vago demais, peça um detalhe curto sobre o assunto.",
       "Nunca faça afirmações sobre arquitetura, banco de dados, retenção, histórico contínuo ou por quanto tempo as conversas são guardadas. Responda apenas com as evidências devolvidas.",
@@ -139,7 +140,7 @@ export async function GET(request: Request) {
               type: "function",
               name: "search_conversation_history",
               description:
-                "Busca o histórico do usuário por palavras e significado, inclusive na conversa atual, recupera o trecho exato e permite expandi-lo antes ou depois.",
+                "Busca o histórico do usuário por palavras e significado, inclusive na conversa atual, recupera o trecho exato e permite expandi-lo antes ou depois. Quando não há resultado no período pedido, pode devolver trechos relacionados de outro período para uma sugestão claramente datada.",
               parameters: {
                 type: "object",
                 additionalProperties: false,

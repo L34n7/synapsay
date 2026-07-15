@@ -33,6 +33,7 @@ type RealtimeEvent = {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MUTE_STORAGE_KEY = "synapsay:microphone-muted";
 
 const stateCopy: Record<VoiceState, { label: string; detail: string }> = {
   connecting: { label: "SINCRONIZANDO", detail: "Preparando canal neural" },
@@ -60,7 +61,11 @@ export default function Dashboard() {
   const [interactionMode, setInteractionMode] = useState<"voice" | "text">("voice");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(MUTE_STORAGE_KEY) === "true",
+  );
   const [energy, setEnergy] = useState(0.08);
   const [transcript, setTranscript] = useState("Estou pronta. Como posso ajudar você hoje?");
   const [clock, setClock] = useState("");
@@ -80,7 +85,7 @@ export default function Dashboard() {
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const frameRef = useRef<number | null>(null);
-  const mutedRef = useRef(false);
+  const mutedRef = useRef(muted);
   const connectedRef = useRef(false);
   const conversationIdRef = useRef<string | null>(null);
   const conversationPromiseRef = useRef<Promise<string> | null>(null);
@@ -268,7 +273,6 @@ export default function Dashboard() {
 
       let output: unknown;
       try {
-        await Promise.allSettled([...pendingSavesRef.current]);
         const currentConversationId = await ensureConversation();
         const latestRequest = latestUserTranscriptRef.current
           .normalize("NFD")
@@ -408,8 +412,6 @@ export default function Dashboard() {
 
   const connect = useCallback(async () => {
     const connectionAttempt = ++connectionAttemptRef.current;
-    setMuted(false);
-    mutedRef.current = false;
     setError("");
     setVoiceState("connecting");
 
@@ -445,18 +447,24 @@ export default function Dashboard() {
         tokenUrl = `/api/realtime/token?conversation=${encodeURIComponent(requestedConversation)}`;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const [stream, tokenResponse] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        }),
+        fetch(tokenUrl, { cache: "no-store" }),
+      ]);
       if (connectionAttempt !== connectionAttemptRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       streamRef.current = stream;
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !mutedRef.current;
+      });
 
       const AudioContextClass = window.AudioContext;
       const context = new AudioContextClass();
@@ -465,9 +473,6 @@ export default function Dashboard() {
       attachAnalyser(context, stream, "mic");
       startMeter();
 
-      const tokenResponse = await fetch(tokenUrl, {
-        cache: "no-store",
-      });
       const tokenData = await tokenResponse.json();
       if (connectionAttempt !== connectionAttemptRef.current) return;
       if (!tokenResponse.ok || !tokenData.value) {
@@ -494,7 +499,16 @@ export default function Dashboard() {
       dataChannelRef.current = channel;
       channel.onopen = () => {
         connectedRef.current = true;
-        setVoiceState("listening");
+        setVoiceState(mutedRef.current ? "muted" : "listening");
+        window.setTimeout(() => {
+          void fetch("/api/history/backfill", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ limit: 50 }),
+          }).catch(() => {
+            // A busca literal continua disponível se o backfill falhar.
+          });
+        }, 2_500);
       };
       channel.onmessage = (event) => {
         try {
@@ -542,13 +556,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const connectTimer = window.setTimeout(() => void connect(), 0);
-    void fetch("/api/history/backfill", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 50 }),
-    }).catch(() => {
-      // O histórico literal continua funcionando se o backfill estiver indisponível.
-    });
     const updateClock = () =>
       setClock(
         new Intl.DateTimeFormat("pt-BR", {
@@ -576,6 +583,7 @@ export default function Dashboard() {
     const next = !muted;
     setMuted(next);
     mutedRef.current = next;
+    window.localStorage.setItem(MUTE_STORAGE_KEY, String(next));
     streamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !next;
     });

@@ -1,8 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  backfillHistoryEmbeddings,
-  createHistoryEmbeddings,
-} from "@/lib/history/embeddings";
+import { createHistoryEmbeddings } from "@/lib/history/embeddings";
 
 export type HistoryDirection = "around" | "before" | "after";
 export type HistoryScope = "current" | "global" | "all";
@@ -31,6 +28,7 @@ export type HistorySearchResult = {
   scope: HistoryScope;
   reason?: "not_found" | "query_too_vague" | "anchor_not_found";
   excerpts: HistoryExcerpt[];
+  relatedExcerpts?: HistoryExcerpt[];
 };
 
 type MessageRow = {
@@ -225,7 +223,6 @@ async function semanticCandidates({
   from?: string | null;
   to?: string | null;
 }): Promise<Candidate[]> {
-  await backfillHistoryEmbeddings({ supabase, userId, limit: 40 });
   const [queryEmbedding] = await createHistoryEmbeddings({
     texts: [query],
     userId,
@@ -271,6 +268,7 @@ export async function searchConversationHistory({
   excludeMessageId,
   from,
   to,
+  allowTemporalFallback = true,
 }: {
   supabase: SupabaseClient;
   userId: string;
@@ -283,6 +281,7 @@ export async function searchConversationHistory({
   excludeMessageId?: string | null;
   from?: string | null;
   to?: string | null;
+  allowTemporalFallback?: boolean;
 }): Promise<HistorySearchResult> {
   const safeQuery = query.trim().slice(0, 300);
   const safeWindow = Math.min(20, Math.max(2, Math.round(window) || 4));
@@ -414,6 +413,28 @@ export async function searchConversationHistory({
   }
 
   if (!selected.length) {
+    if (allowTemporalFallback && (safeFrom || safeTo)) {
+      const related = await searchConversationHistory({
+        supabase,
+        userId,
+        query: safeQuery,
+        direction,
+        scope: safeScope,
+        window: safeWindow,
+        currentConversationId,
+        excludeMessageId,
+        allowTemporalFallback: false,
+      });
+      return {
+        found: false,
+        query: safeQuery,
+        direction,
+        scope: safeScope,
+        reason: "not_found",
+        excerpts: [],
+        relatedExcerpts: related.found ? related.excerpts : [],
+      };
+    }
     return {
       found: false,
       query: safeQuery,
@@ -448,14 +469,29 @@ export async function searchConversationHistory({
 
 export function formatHistoryForModel(result: HistorySearchResult) {
   if (!result.found) {
+    const related = (result.relatedExcerpts ?? [])
+      .map((excerpt, index) => {
+        const messages = excerpt.messages
+          .map(
+            (message) =>
+              `[${message.id}] ${message.createdAt} — ${message.role === "user" ? "USUÁRIO" : "SYNAPSAY"}: ${message.content}`,
+          )
+          .join("\n");
+        return `TRECHO RELACIONADO ${index + 1} — ${excerpt.conversationTitle}\n${messages}`;
+      })
+      .join("\n\n");
     return [
       "<resultado_busca_historico>",
       `Nenhum trecho foi encontrado para: ${result.query || "consulta sem assunto definido"}.`,
       "Não invente nem presuma que isso foi conversado. Diga de modo humano que não encontrou esse assunto e, se útil, peça uma palavra-chave ou detalhe curto.",
+      related
+        ? "Há trechos relacionados fora do período solicitado abaixo. Não os apresente como se fossem do período pedido. Se forem compromissos de uma data próxima, diga brevemente que não encontrou nada para a data solicitada, cite a outra data com clareza e pergunte se a pessoa quer antecipar ou reorganizar essas tarefas."
+        : "",
       result.reason === "query_too_vague"
         ? "A pergunta ficou vaga; peça ao usuário um detalhe curto sobre o assunto."
         : "",
       "Não faça afirmações sobre limitações técnicas, retenção, banco de dados ou por quanto tempo o sistema guarda conversas.",
+      related,
       "</resultado_busca_historico>",
     ]
       .filter(Boolean)
