@@ -179,6 +179,29 @@ export default function Dashboard() {
             throw new Error(data?.error ?? "Falha ao salvar a mensagem.");
           }
           setHistoryStatus("saved");
+
+          // A fala já foi salva. Agora o cérebro analisa a conversa sem
+          // bloquear a resposta de voz e grava somente memórias úteis.
+          if (role === "user") {
+            void fetch(`/api/conversations/${conversationId}/memories/auto`, {
+              method: "POST",
+            })
+              .then(async (memoryResponse) => {
+                if (!memoryResponse.ok) {
+                  const data = await memoryResponse.json().catch(() => null);
+                  console.warn(
+                    "Falha ao sincronizar memória automática:",
+                    data?.error ?? memoryResponse.status,
+                  );
+                }
+              })
+              .catch((memoryError) => {
+                console.warn(
+                  "Falha ao iniciar memória automática:",
+                  memoryError,
+                );
+              });
+          }
         } catch (reason) {
           savedEventsRef.current.delete(externalEventId);
           setHistoryStatus("error");
