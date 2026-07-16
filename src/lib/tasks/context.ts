@@ -1,6 +1,54 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TaskRecord } from "@/lib/tasks/types";
 
+const DEFAULT_TIME_ZONE = "America/Sao_Paulo";
+
+function validTimeZone(timeZone: string) {
+  try {
+    new Intl.DateTimeFormat("pt-BR", { timeZone }).format();
+    return timeZone;
+  } catch {
+    return DEFAULT_TIME_ZONE;
+  }
+}
+
+export function formatTaskDateTime(
+  value: string | null,
+  timeZone = DEFAULT_TIME_ZONE,
+  dateOnly = false,
+) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: validTimeZone(timeZone),
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    ...(dateOnly ? {} : { hour: "2-digit", minute: "2-digit", hourCycle: "h23" as const }),
+  }).format(date);
+}
+
+export function taskForAssistant(task: TaskRecord) {
+  const timeZone = validTimeZone(task.timezone || DEFAULT_TIME_ZONE);
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    scheduledLocal: formatTaskDateTime(task.scheduled_at, timeZone, task.all_day),
+    dueLocal: formatTaskDateTime(task.due_at, timeZone, task.all_day),
+    allDay: task.all_day,
+    timeZone,
+    reminders: (task.reminders ?? [])
+      .filter((reminder) => reminder.status === "scheduled")
+      .map((reminder) => ({
+        status: reminder.status,
+        remindAtLocal: formatTaskDateTime(reminder.remind_at, timeZone),
+      })),
+    details: task.description || null,
+  };
+}
+
 export async function loadOpenTasks({
   supabase,
   userId,
@@ -29,18 +77,20 @@ export function formatTasksForModel(tasks: TaskRecord[]) {
   if (!tasks.length) return "Nenhuma tarefa ativa encontrada.";
   return tasks
     .map((task) => {
-      const reminders = (task.reminders ?? [])
-        .filter((reminder) => reminder.status === "scheduled")
-        .map((reminder) => reminder.remind_at)
+      const formatted = taskForAssistant(task);
+      const reminders = formatted.reminders
+        .map((reminder) => reminder.remindAtLocal)
+        .filter(Boolean)
         .join(", ");
       return [
         `- ID ${task.id}`,
         `título: ${task.title}`,
         `status: ${task.status}`,
-        `agendada: ${task.scheduled_at ?? "sem horário"}`,
-        `prazo: ${task.due_at ?? "sem prazo"}`,
+        `agendada no horário local: ${formatted.scheduledLocal ?? "sem horário"}`,
+        `prazo no horário local: ${formatted.dueLocal ?? "sem prazo"}`,
+        `fuso: ${formatted.timeZone}`,
         `dia inteiro: ${task.all_day ? "sim" : "não"}`,
-        `lembretes: ${reminders || "nenhum"}`,
+        `lembretes no horário local: ${reminders || "nenhum"}`,
         task.description ? `detalhes: ${task.description.slice(0, 500)}` : "",
       ]
         .filter(Boolean)
@@ -71,4 +121,3 @@ export function localDayRange(timeZone = "America/Sao_Paulo", offsetDays = 0) {
     to: new Date(`${date}T23:59:59.999-03:00`).toISOString(),
   };
 }
-

@@ -5,6 +5,7 @@ import {
   formatTasksForModel,
   loadOpenTasks,
   localDayRange,
+  taskForAssistant,
 } from "@/lib/tasks/context";
 import {
   normalizePriority,
@@ -39,6 +40,7 @@ export type TaskBrainResult = {
   needsClarification: boolean;
   clarificationQuestion: string;
   applied: Array<{ action: string; taskId: string; title: string }>;
+  appliedTasks: TaskRecord[];
   tasks: TaskRecord[];
   relatedTasks: TaskRecord[];
 };
@@ -232,7 +234,9 @@ export async function analyzeAndApplyTaskMessage({
         "Use intent=query quando a pessoa perguntar o que tem para fazer, pedir a agenda ou consultar tarefas. Use intent=mutate para criar, alterar, concluir ou cancelar. Caso contrário use none.",
         "Crie tarefas apenas a partir de planos, compromissos, obrigações ou pedidos explicitamente declarados pelo USUÁRIO. Nunca transforme sugestões da SYNAPSAY, hipóteses ou exemplos em tarefa.",
         "Uma mensagem pode criar várias tarefas. Faça cada tarefa atômica, com título direto e descrição fiel, sem inventar nomes, horários ou locais.",
+        "Ignore frases interrompidas, reticências e pensamentos que ficaram sem complemento. Nunca associe um horário dito em uma frase completa posterior a uma frase anterior incompleta. Só combine trechos quando o usuário completar explicitamente a mesma informação.",
         "Para hoje/amanhã sem horário exato, use uma data desse dia em scheduled_at, marque all_day=true e deixe reminder_at=null. Para expressões vagas como 'mais tarde', 'depois da igreja' ou 'daqui a pouco', nunca invente horário.",
+        "Ao converter um horário falado pelo usuário para ISO 8601, interprete-o primeiro em America/Sao_Paulo e inclua o deslocamento local -03:00 no valor gerado.",
         "Só preencha reminder_at quando houver horário exato ou um deslocamento calculável. Se o usuário pedir para ser avisado mas não informar horário suficiente, registre a tarefa, defina needs_clarification=true e faça uma pergunta curta pedindo o horário.",
         "Ao alterar, concluir ou cancelar, use exclusivamente um task_id fornecido na lista de tarefas. Se houver ambiguidade, não aplique ação e peça esclarecimento.",
         "Não duplique uma tarefa existente com o mesmo significado; atualize-a quando a nova mensagem completar data, horário, descrição ou lembrete.",
@@ -389,6 +393,7 @@ export async function analyzeAndApplyTaskMessage({
   }
 
   const refreshed = await loadOpenTasks({ supabase, userId, limit: 100 });
+  const appliedIds = new Set(applied.map((item) => item.taskId));
   const scopedTasks = tasksForScope(refreshed, decision.queryScope);
   const relatedTasks =
     !scopedTasks.length && ["today", "tomorrow"].includes(decision.queryScope)
@@ -400,8 +405,37 @@ export async function analyzeAndApplyTaskMessage({
     needsClarification: decision.needsClarification,
     clarificationQuestion: decision.clarificationQuestion,
     applied,
+    appliedTasks: refreshed.filter((task) => appliedIds.has(task.id)),
     tasks: scopedTasks,
     relatedTasks,
+  };
+}
+
+export function formatTaskBrainToolResult(result: TaskBrainResult) {
+  const appliedById = new Map(result.appliedTasks.map((task) => [task.id, task]));
+  const agenda = result.intent === "mutate" ? result.appliedTasks : result.tasks;
+  return {
+    success: true,
+    intent: result.intent,
+    needsClarification: result.needsClarification,
+    clarificationQuestion: result.clarificationQuestion,
+    operations: result.applied.map((item) => ({
+      action: item.action,
+      taskId: item.taskId,
+      title: item.title,
+      task: appliedById.has(item.taskId)
+        ? taskForAssistant(appliedById.get(item.taskId)!)
+        : null,
+    })),
+    agenda: agenda.map(taskForAssistant),
+    relatedAgenda:
+      result.intent === "query" ? result.relatedTasks.map(taskForAssistant) : [],
+    responseRules: [
+      "Todos os horários já estão convertidos para o fuso indicado em timeZone.",
+      "Repita scheduledLocal, dueLocal e remindAtLocal exatamente como recebidos; não recalcule nem converta o horário.",
+      "Confirme um lembrete somente quando ele aparecer em task.reminders.",
+      "Não mencione o status pending, a menos que o usuário pergunte pelo status.",
+    ],
   };
 }
 

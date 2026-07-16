@@ -1,6 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { analyzeAndApplyTaskMessage } from "@/lib/tasks/brain";
+import {
+  analyzeAndApplyTaskMessage,
+  formatTaskBrainToolResult,
+} from "@/lib/tasks/brain";
 import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
 
 export const runtime = "nodejs";
@@ -53,11 +56,19 @@ export async function POST(request: Request) {
       (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) &&
       result.applied.length
     ) {
-      await Promise.allSettled(
-        result.applied.map((item) => syncTaskToGoogle(userId, item.taskId)),
-      );
+      const taskIds = result.applied.map((item) => item.taskId);
+      after(async () => {
+        const settled = await Promise.allSettled(
+          taskIds.map((taskId) => syncTaskToGoogle(userId, taskId)),
+        );
+        settled.forEach((item, index) => {
+          if (item.status === "rejected") {
+            console.warn(`Tarefa ${taskIds[index]} não sincronizada com o Google:`, item.reason);
+          }
+        });
+      });
     }
-    return NextResponse.json(result);
+    return NextResponse.json(formatTaskBrainToolResult(result));
   } catch (reason) {
     console.error("Falha no cérebro de tarefas:", reason);
     return NextResponse.json(
