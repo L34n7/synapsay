@@ -14,7 +14,7 @@ import {
   formatTaskBrainResult,
   type TaskBrainResult,
 } from "@/lib/tasks/brain";
-import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
+import { syncGoogleCalendarForUser, syncTaskToGoogle } from "@/lib/google-calendar/sync";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -162,6 +162,15 @@ export async function POST(request: Request) {
 
   let taskBrainResult: TaskBrainResult | null = null;
   try {
+    if (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      await syncGoogleCalendarForUser(userId, { minIntervalMs: 10 * 60_000 }).catch((reason) => {
+        const expected =
+          reason instanceof Error &&
+          (reason.message.includes("já está em andamento") ||
+            reason.message.includes("não conectado"));
+        if (!expected) console.warn("Google Agenda não sincronizada antes da resposta:", reason);
+      });
+    }
     taskBrainResult = await analyzeAndApplyTaskMessage({
       supabase,
       userId,

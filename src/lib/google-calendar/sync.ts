@@ -1,4 +1,10 @@
-import { GoogleCalendarError, googleCalendarFetch, getGoogleCalendarIntegration } from "@/lib/google-calendar/client";
+import { randomUUID } from "node:crypto";
+import {
+  GoogleCalendarError,
+  googleCalendarFetch,
+  getGoogleCalendarIntegration,
+  type GoogleCalendarIntegration,
+} from "@/lib/google-calendar/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type GoogleCalendarEntry = {
@@ -58,6 +64,12 @@ type EventLink = {
 
 const TASK_SELECT =
   "id, user_id, title, description, status, scheduled_at, due_at, all_day, timezone, updated_at, reminders(remind_at, status)";
+const SYNC_LOCK_TTL_MS = 10 * 60_000;
+
+type SyncGoogleCalendarOptions = {
+  force?: boolean;
+  minIntervalMs?: number;
+};
 
 function encodePath(value: string) {
   return encodeURIComponent(value);
@@ -471,39 +483,124 @@ async function exportSynapsayTasks(userId: string, lastSyncAt: string | null) {
   return exported;
 }
 
-export async function syncGoogleCalendarForUser(userId: string, force = false) {
+function normalizeSyncOptions(options: boolean | SyncGoogleCalendarOptions = {}) {
+  return typeof options === "boolean" ? { force: options } : options;
+}
+
+function isFresh(lastSyncAt: string | null, minIntervalMs = 0) {
+  return Boolean(
+    lastSyncAt &&
+      minIntervalMs > 0 &&
+      Date.now() - new Date(lastSyncAt).getTime() < minIntervalMs,
+  );
+}
+
+function recentFailureCooldown(integration: GoogleCalendarIntegration, minIntervalMs = 0) {
+  return Boolean(
+    integration.last_sync_error &&
+      minIntervalMs > 0 &&
+      Date.now() - new Date(integration.updated_at).getTime() < minIntervalMs,
+  );
+}
+
+async function acquireSyncLock(integration: GoogleCalendarIntegration) {
+  const admin = createAdminClient();
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - SYNC_LOCK_TTL_MS).toISOString();
+  const token = randomUUID();
+  const { data, error } = await admin
+    .from("google_calendar_integrations")
+    .update({
+      sync_started_at: now.toISOString(),
+      sync_lock_token: token,
+      last_sync_error: null,
+    })
+    .eq("user_id", integration.user_id)
+    .or(`sync_started_at.is.null,sync_started_at.lt.${staleBefore}`)
+    .select("*")
+    .maybeSingle();
+  if (error) throw new GoogleCalendarError(error.message);
+  if (!data) {
+    throw new GoogleCalendarError(
+      "Uma sincronização do Google Agenda já está em andamento.",
+      409,
+      "google_sync_in_progress",
+    );
+  }
+  return { integration: data as GoogleCalendarIntegration, token, startedAt: now.toISOString() };
+}
+
+async function releaseSyncLock({
+  userId,
+  token,
+  lastSyncAt,
+  errorMessage,
+}: {
+  userId: string;
+  token: string;
+  lastSyncAt?: string;
+  errorMessage?: string;
+}) {
+  const update: Record<string, string | null> = {
+    sync_started_at: null,
+    sync_lock_token: null,
+  };
+  if (lastSyncAt) {
+    update.last_sync_at = lastSyncAt;
+    update.last_sync_error = null;
+  } else if (errorMessage) {
+    update.last_sync_error = errorMessage.slice(0, 1000);
+  }
+  const { error } = await createAdminClient()
+    .from("google_calendar_integrations")
+    .update(update)
+    .eq("user_id", userId)
+    .eq("sync_lock_token", token);
+  if (error) throw new GoogleCalendarError(error.message);
+}
+
+export async function syncGoogleCalendarForUser(
+  userId: string,
+  options: boolean | SyncGoogleCalendarOptions = {},
+) {
+  const { force = false, minIntervalMs = 0 } = normalizeSyncOptions(options);
   const integration = await getGoogleCalendarIntegration(userId);
   if (!integration) {
     throw new GoogleCalendarError("Google Agenda não conectado.", 404, "google_not_connected");
   }
   if (!integration.sync_enabled && !force) return { skipped: true };
+  if (isFresh(integration.last_sync_at, minIntervalMs)) {
+    return { skipped: true, reason: "recent_sync", syncedAt: integration.last_sync_at };
+  }
+  if (!force && recentFailureCooldown(integration, minIntervalMs)) {
+    return { skipped: true, reason: "recent_sync_error" };
+  }
 
-  const startedAt = new Date().toISOString();
+  const lock = await acquireSyncLock(integration);
+  if (isFresh(lock.integration.last_sync_at, minIntervalMs)) {
+    await releaseSyncLock({ userId, token: lock.token });
+    return { skipped: true, reason: "recent_sync", syncedAt: lock.integration.last_sync_at };
+  }
+
   try {
+    const exported =
+      lock.integration.sync_direction === "google_to_synapsay"
+        ? 0
+        : await exportSynapsayTasks(userId, lock.integration.last_sync_at);
     const pull =
-      integration.sync_direction === "synapsay_to_google"
+      lock.integration.sync_direction === "synapsay_to_google"
         ? { received: 0, imported: 0, updated: 0, cancelled: 0 }
         : await importGoogleEvents({
             userId,
-            calendarId: integration.selected_calendar_id,
-            calendarTimezone: integration.selected_calendar_timezone,
-            lastSyncAt: integration.last_sync_at,
+            calendarId: lock.integration.selected_calendar_id,
+            calendarTimezone: lock.integration.selected_calendar_timezone,
+            lastSyncAt: lock.integration.last_sync_at,
           });
-    const exported =
-      integration.sync_direction === "google_to_synapsay"
-        ? 0
-        : await exportSynapsayTasks(userId, integration.last_sync_at);
-    await createAdminClient()
-      .from("google_calendar_integrations")
-      .update({ last_sync_at: startedAt, last_sync_error: null })
-      .eq("user_id", userId);
-    return { ...pull, exported, syncedAt: startedAt };
+    await releaseSyncLock({ userId, token: lock.token, lastSyncAt: lock.startedAt });
+    return { ...pull, exported, syncedAt: lock.startedAt };
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : "Falha ao sincronizar agendas.";
-    await createAdminClient()
-      .from("google_calendar_integrations")
-      .update({ last_sync_error: message.slice(0, 1000) })
-      .eq("user_id", userId);
+    await releaseSyncLock({ userId, token: lock.token, errorMessage: message });
     throw reason;
   }
 }

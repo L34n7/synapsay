@@ -24,6 +24,8 @@ export type GoogleCalendarIntegration = {
   sync_direction: SyncDirection;
   last_sync_at: string | null;
   last_sync_error: string | null;
+  sync_started_at: string | null;
+  sync_lock_token: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -37,6 +39,14 @@ type GoogleTokenResponse = {
   id_token?: string;
   error?: string;
   error_description?: string;
+};
+
+type GoogleApiErrorPayload = {
+  error?: {
+    message?: string;
+    code?: number;
+    errors?: Array<{ reason?: string; message?: string }>;
+  };
 };
 
 export class GoogleCalendarError extends Error {
@@ -162,6 +172,8 @@ export async function saveGoogleAuthorization({
     sync_enabled: true,
     last_sync_at: null,
     last_sync_error: null,
+    sync_started_at: null,
+    sync_lock_token: null,
   });
   if (error) throw new GoogleCalendarError(error.message);
 }
@@ -253,28 +265,44 @@ export async function googleCalendarFetch<T>({
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
 }) {
-  const { accessToken } = await getGoogleAccessToken(userId);
-  const response = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (response.status === 204) return null as T;
-  const payload = (await response.json().catch(() => ({}))) as T & {
-    error?: { message?: string; code?: number };
-  };
-  if (!response.ok) {
+  let lastErrorPayload: GoogleApiErrorPayload | null = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { accessToken } = await getGoogleAccessToken(userId);
+    const response = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (response.status === 204) return null as T;
+    const payload = (await response.json().catch(() => ({}))) as T & GoogleApiErrorPayload;
+    if (response.ok) return payload;
+
+    lastErrorPayload = payload;
+    const message = payload.error?.message ?? "";
+    const reason = payload.error?.errors?.[0]?.reason ?? "";
+    const retryable =
+      response.status === 429 ||
+      (response.status === 403 && /rate|quota|limit/i.test(`${message} ${reason}`));
+    if (!retryable || attempt === 3) {
+      throw new GoogleCalendarError(
+        message || "O Google Agenda recusou a operação.",
+        response.status,
+        "google_api_error",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350 * 2 ** attempt));
+  }
+  {
     throw new GoogleCalendarError(
-      payload.error?.message ?? "O Google Agenda recusou a operação.",
-      response.status,
+      lastErrorPayload?.error?.message ?? "O Google Agenda recusou a operação.",
+      lastErrorPayload?.error?.code ?? 500,
       "google_api_error",
     );
   }
-  return payload;
 }
 
 export function publicIntegrationStatus(integration: GoogleCalendarIntegration | null) {
@@ -291,6 +319,10 @@ export function publicIntegrationStatus(integration: GoogleCalendarIntegration |
     syncDirection: integration.sync_direction,
     lastSyncAt: integration.last_sync_at,
     lastSyncError: integration.last_sync_error,
+    syncStartedAt: integration.sync_started_at,
+    syncInProgress:
+      Boolean(integration.sync_started_at) &&
+      Date.now() - new Date(integration.sync_started_at ?? 0).getTime() < 10 * 60_000,
     reconnectRequired:
       !integration.sync_enabled &&
       integration.last_sync_error?.toLowerCase().includes("revogado"),

@@ -17,6 +17,8 @@ type IntegrationStatus =
       syncDirection: Direction;
       lastSyncAt: string | null;
       lastSyncError: string | null;
+      syncStartedAt: string | null;
+      syncInProgress: boolean;
       reconnectRequired: boolean;
     };
 type CalendarOption = {
@@ -63,12 +65,22 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
     setMessage("");
     try {
       const data = await jsonRequest<{
-        result: { imported?: number; updated?: number; exported?: number };
+        result: {
+          imported?: number;
+          updated?: number;
+          exported?: number;
+          skipped?: boolean;
+          reason?: string;
+        };
       }>("/api/integracoes/google-calendar/sincronizar", { method: "POST" });
       const result = data.result;
-      setMessage(
-        `Sincronização concluída: ${result.imported ?? 0} importados, ${result.updated ?? 0} atualizados e ${result.exported ?? 0} enviados.`,
-      );
+      if (result.skipped) {
+        setMessage("A agenda já está atualizada ou existe uma sincronização em andamento.");
+      } else {
+        setMessage(
+          `Sincronização concluída: ${result.imported ?? 0} importados, ${result.updated ?? 0} atualizados e ${result.exported ?? 0} enviados.`,
+        );
+      }
       await loadStatus();
       onSynced();
     } catch (reason) {
@@ -113,17 +125,6 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
         }
         if (!current.connected) return;
         await loadCalendars();
-        const lastSyncTime = current.lastSyncAt
-          ? new Date(current.lastSyncAt).getTime()
-          : 0;
-        if (
-          !callbackHandled.current &&
-          current.syncEnabled &&
-          Date.now() - lastSyncTime > 5 * 60_000
-        ) {
-          callbackHandled.current = true;
-          await synchronize();
-        }
         }).catch((reason) => {
           if (active) setError(reason instanceof Error ? reason.message : "Falha ao carregar integração.");
         });
@@ -258,7 +259,14 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
 
       <div className={styles.googleFooter}>
         <span>
-          {status.lastSyncAt
+          {status.syncInProgress && status.syncStartedAt
+            ? `Sincronizando desde ${new Intl.DateTimeFormat("pt-BR", {
+                dateStyle: "short",
+                timeStyle: "short",
+              }).format(new Date(status.syncStartedAt))}`
+            : status.syncInProgress
+            ? "Sincronização em andamento"
+            : status.lastSyncAt
             ? `Última sincronização: ${new Intl.DateTimeFormat("pt-BR", {
                 dateStyle: "short",
                 timeStyle: "short",
@@ -273,9 +281,9 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
             <button
               className={styles.googleSync}
               onClick={() => void synchronize()}
-              disabled={busy !== ""}
+              disabled={busy !== "" || status.syncInProgress}
             >
-              {busy === "sync" ? "SINCRONIZANDO..." : "SINCRONIZAR AGORA"}
+              {busy === "sync" || status.syncInProgress ? "SINCRONIZANDO..." : "SINCRONIZAR AGORA"}
             </button>
           )}
         </div>
