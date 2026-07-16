@@ -3,6 +3,7 @@ import { authenticatedUserId, googleCalendarErrorResponse } from "@/lib/google-c
 import { getGoogleCalendarIntegration, publicIntegrationStatus } from "@/lib/google-calendar/client";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const userId = await authenticatedUserId();
@@ -10,6 +11,7 @@ export async function GET() {
   try {
     return NextResponse.json(
       publicIntegrationStatus(await getGoogleCalendarIntegration(userId)),
+      { headers: { "Cache-Control": "no-store, max-age=0" } },
     );
   } catch (reason) {
     return googleCalendarErrorResponse(reason);
