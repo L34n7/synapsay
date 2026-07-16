@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticatedUserId, googleCalendarErrorResponse } from "@/lib/google-calendar/api";
-import type { SyncDirection } from "@/lib/google-calendar/client";
+import { type GoogleCalendarIntegration, type SyncDirection } from "@/lib/google-calendar/client";
+import { ensureGoogleCalendarWatches } from "@/lib/google-calendar/subscriptions";
 import { listGoogleCalendars } from "@/lib/google-calendar/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -53,7 +54,7 @@ export async function PATCH(request: Request) {
       .from("google_calendar_integrations")
       .update(update)
       .eq("user_id", userId)
-      .select("selected_calendar_id, selected_calendar_name, selected_calendar_timezone, sync_enabled, sync_direction")
+      .select("*")
       .maybeSingle();
     if (error || !data) {
       return NextResponse.json(
@@ -61,6 +62,9 @@ export async function PATCH(request: Request) {
         { status: error ? 500 : 404 },
       );
     }
+    await ensureGoogleCalendarWatches(userId, data as GoogleCalendarIntegration).catch((reason) => {
+      console.warn("Notificações do Google Agenda não atualizadas:", reason);
+    });
     return NextResponse.json({ updated: true, integration: data });
   } catch (reason) {
     return googleCalendarErrorResponse(reason);

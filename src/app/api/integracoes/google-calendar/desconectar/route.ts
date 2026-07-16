@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticatedUserId, googleCalendarErrorResponse } from "@/lib/google-calendar/api";
 import { decryptGoogleToken } from "@/lib/google-calendar/crypto";
 import { getGoogleCalendarIntegration } from "@/lib/google-calendar/client";
+import { stopGoogleCalendarWatches } from "@/lib/google-calendar/subscriptions";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -15,6 +16,7 @@ export async function DELETE() {
     const token = integration.refresh_token_ciphertext
       ? decryptGoogleToken(integration.refresh_token_ciphertext)
       : decryptGoogleToken(integration.access_token_ciphertext);
+    await stopGoogleCalendarWatches(userId);
     await fetch("https://oauth2.googleapis.com/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

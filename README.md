@@ -28,6 +28,8 @@ GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:3000/api/integracoes/google-calend
 # Em produção, use a callback https://synapsay.vercel.app/api/integracoes/google-calendar/callback
 # Gere uma chave longa e aleatória, por exemplo: openssl rand -base64 48
 GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY=
+# Opcional: derivada automaticamente da origem da callback em produção.
+GOOGLE_CALENDAR_WEBHOOK_URL=https://synapsay.vercel.app/api/integracoes/google-calendar/webhook
 
 # Protege a rotina automática diária da Vercel (mínimo de 16 caracteres)
 CRON_SECRET=
@@ -45,9 +47,9 @@ A Synapsay também possui busca global de histórico. Pedidos como **“lembra d
 
 Antes de conectar uma conta, aplique a migration `20260716064051_google_calendar_integration.sql`. Depois, abra `/agenda` e use **Conectar Google Agenda**.
 
-A integração permite escolher qualquer agenda em que a conta tenha permissão de escrita e oferece três fluxos: bidirecional, somente Google → Synapsay ou somente Synapsay → Google. A sincronização acontece ao abrir a agenda, pelo botão **Sincronizar agora**, sempre que uma tarefa local é criada, alterada ou cancelada e pela rotina diária da Vercel configurada em `vercel.json`. Tarefas criadas pela assistente também são enviadas automaticamente.
+A integração permite escolher qualquer agenda em que a conta tenha permissão de escrita e oferece três fluxos: bidirecional, somente Google → Synapsay ou somente Synapsay → Google. Depois da primeira carga, a sincronização usa o `syncToken` do Google para buscar somente alterações. O Google avisa o webhook quando a agenda muda e, antes de responder, a assistente aplica as mudanças pendentes. Uma consulta incremental curta também é feita no início das mensagens para cobrir notificações eventualmente não entregues. Tarefas locais são enviadas automaticamente ao Google.
 
-O cron padrão roda diariamente às 09:00 UTC (06:00 em Brasília), frequência compatível com o plano Hobby da Vercel. Em um plano Pro, a expressão pode ser aumentada para uma execução horária (`0 * * * *`).
+O cron padrão roda diariamente às 09:00 UTC (06:00 em Brasília), frequência compatível com o plano Hobby da Vercel. Além da reconciliação de segurança, ele renova os canais de notificação que estiverem próximos do vencimento. Em um plano Pro, a expressão pode ser aumentada para uma execução horária (`0 * * * *`).
 
 Os tokens OAuth são criptografados com AES-256-GCM antes de serem armazenados. As tabelas da integração não concedem acesso aos papéis `anon` e `authenticated`; somente o backend com `service_role` pode lê-las.
 

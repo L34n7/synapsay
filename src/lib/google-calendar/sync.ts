@@ -5,6 +5,12 @@ import {
   getGoogleCalendarIntegration,
   type GoogleCalendarIntegration,
 } from "@/lib/google-calendar/client";
+import {
+  ensureGoogleCalendarWatches,
+  eventSyncState,
+  hasPendingGoogleCalendarChanges,
+  saveEventSyncToken,
+} from "@/lib/google-calendar/subscriptions";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type GoogleCalendarEntry = {
@@ -316,34 +322,57 @@ export async function deleteTaskFromGoogle(userId: string, taskId: string) {
   if (data) await deleteGoogleEventLink(userId, data as EventLink);
 }
 
-async function listChangedEvents(userId: string, calendarId: string, lastSyncAt: string | null) {
+async function listChangedEvents({
+  userId,
+  calendarId,
+  syncToken,
+  lastSyncAt,
+}: {
+  userId: string;
+  calendarId: string;
+  syncToken: string | null;
+  lastSyncAt: string | null;
+}) {
   const events: GoogleEvent[] = [];
   let pageToken = "";
+  let nextSyncToken = "";
   do {
     const params = new URLSearchParams({
       maxResults: "500",
       singleEvents: "true",
       showDeleted: "true",
-      timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      timeMax: new Date(Date.now() + 366 * 24 * 60 * 60 * 1000).toISOString(),
     });
-    if (lastSyncAt) {
+    if (syncToken) {
+      params.set("syncToken", syncToken);
+    } else {
+      params.set("timeMin", new Date(Date.now() - 24 * 60 * 60_000).toISOString());
+      params.set("timeMax", new Date(Date.now() + 366 * 24 * 60 * 60_000).toISOString());
+      params.set("orderBy", "startTime");
+    }
+    if (!syncToken && lastSyncAt) {
       params.set(
         "updatedMin",
         new Date(new Date(lastSyncAt).getTime() - 5 * 60_000).toISOString(),
       );
-    } else {
-      params.set("orderBy", "startTime");
     }
     if (pageToken) params.set("pageToken", pageToken);
     const payload = await googleCalendarFetch<{
       items?: GoogleEvent[];
       nextPageToken?: string;
+      nextSyncToken?: string;
     }>({ userId, path: `/calendars/${encodePath(calendarId)}/events?${params}` });
     events.push(...(payload.items ?? []));
     pageToken = payload.nextPageToken ?? "";
-  } while (pageToken && events.length < 2_000);
-  return events;
+    nextSyncToken = payload.nextSyncToken ?? nextSyncToken;
+    if (pageToken && events.length >= 10_000) {
+      throw new GoogleCalendarError(
+        "A agenda possui alterações demais para uma única sincronização.",
+        413,
+        "google_sync_too_large",
+      );
+    }
+  } while (pageToken);
+  return { events, nextSyncToken };
 }
 
 async function importGoogleEvents({
@@ -351,14 +380,31 @@ async function importGoogleEvents({
   calendarId,
   calendarTimezone,
   lastSyncAt,
+  syncStartedAt,
 }: {
   userId: string;
   calendarId: string;
   calendarTimezone: string;
   lastSyncAt: string | null;
+  syncStartedAt: string;
 }) {
   const admin = createAdminClient();
-  const events = await listChangedEvents(userId, calendarId, lastSyncAt);
+  const channel = await eventSyncState(userId, calendarId);
+  let changes: Awaited<ReturnType<typeof listChangedEvents>>;
+  try {
+    changes = await listChangedEvents({
+      userId,
+      calendarId,
+      syncToken: channel?.sync_token ?? null,
+      lastSyncAt: channel ? null : lastSyncAt,
+    });
+  } catch (reason) {
+    if (!(reason instanceof GoogleCalendarError) || reason.status !== 410 || !channel?.sync_token) {
+      throw reason;
+    }
+    changes = await listChangedEvents({ userId, calendarId, syncToken: null, lastSyncAt: null });
+  }
+  const events = changes.events;
   const { data: linksData, error: linksError } = await admin
     .from("google_calendar_event_links")
     .select("*")
@@ -458,6 +504,9 @@ async function importGoogleEvents({
       );
     }
     await saveEventLink({ userId, taskId: taskId!, calendarId, event });
+  }
+  if (channel && changes.nextSyncToken) {
+    await saveEventSyncToken({ channel, syncToken: changes.nextSyncToken, syncStartedAt });
   }
   return { received: events.length, imported, updated, cancelled };
 }
@@ -569,7 +618,11 @@ export async function syncGoogleCalendarForUser(
     throw new GoogleCalendarError("Google Agenda não conectado.", 404, "google_not_connected");
   }
   if (!integration.sync_enabled && !force) return { skipped: true };
-  if (isFresh(integration.last_sync_at, minIntervalMs)) {
+  const pendingChanges = await hasPendingGoogleCalendarChanges(
+    userId,
+    integration.selected_calendar_id,
+  );
+  if (!pendingChanges && isFresh(integration.last_sync_at, minIntervalMs)) {
     return { skipped: true, reason: "recent_sync", syncedAt: integration.last_sync_at };
   }
   if (!force && recentFailureCooldown(integration, minIntervalMs)) {
@@ -577,12 +630,19 @@ export async function syncGoogleCalendarForUser(
   }
 
   const lock = await acquireSyncLock(integration);
-  if (isFresh(lock.integration.last_sync_at, minIntervalMs)) {
+  const pendingAfterLock = await hasPendingGoogleCalendarChanges(
+    userId,
+    lock.integration.selected_calendar_id,
+  );
+  if (!pendingAfterLock && isFresh(lock.integration.last_sync_at, minIntervalMs)) {
     await releaseSyncLock({ userId, token: lock.token });
     return { skipped: true, reason: "recent_sync", syncedAt: lock.integration.last_sync_at };
   }
 
   try {
+    await ensureGoogleCalendarWatches(userId, lock.integration).catch((reason) => {
+      console.warn("Notificações do Google Agenda não configuradas:", reason);
+    });
     const exported =
       lock.integration.sync_direction === "google_to_synapsay"
         ? 0
@@ -595,6 +655,7 @@ export async function syncGoogleCalendarForUser(
             calendarId: lock.integration.selected_calendar_id,
             calendarTimezone: lock.integration.selected_calendar_timezone,
             lastSyncAt: lock.integration.last_sync_at,
+            syncStartedAt: lock.startedAt,
           });
     await releaseSyncLock({ userId, token: lock.token, lastSyncAt: lock.startedAt });
     return { ...pull, exported, syncedAt: lock.startedAt };

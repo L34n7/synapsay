@@ -163,7 +163,7 @@ export async function POST(request: Request) {
   let taskBrainResult: TaskBrainResult | null = null;
   try {
     if (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      await syncGoogleCalendarForUser(userId, { minIntervalMs: 10 * 60_000 }).catch((reason) => {
+      await syncGoogleCalendarForUser(userId, { minIntervalMs: 30_000 }).catch((reason) => {
         const expected =
           reason instanceof Error &&
           (reason.message.includes("já está em andamento") ||
