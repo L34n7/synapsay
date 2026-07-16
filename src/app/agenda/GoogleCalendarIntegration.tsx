@@ -44,7 +44,7 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
 
   const loadStatus = useCallback(async () => {
     const data = await jsonRequest<IntegrationStatus>(
-      "/api/integracoes/google-calendar/status",
+      `/api/integracoes/google-calendar/status?at=${Date.now()}`,
     );
     setStatus(data);
     return data;
@@ -96,10 +96,16 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
             "",
             `${window.location.pathname}${query.size ? `?${query}` : ""}`,
           );
-          if (callbackStatus === "connected" && current.connected) {
-            setMessage("Conta Google conectada. Preparando a primeira sincronização...");
-            await loadCalendars();
-            await synchronize();
+          if (callbackStatus === "connected") {
+            if (current.connected) {
+              setMessage("Conta Google conectada. Preparando a primeira sincronização...");
+              await loadCalendars();
+              await synchronize();
+            } else {
+              setError(
+                "O Google autorizou a conexão, mas a Synapsay não conseguiu confirmar o vínculo. Atualize a página; se o botão continuar aparecendo, conecte novamente.",
+              );
+            }
           } else if (callbackMessage) {
             setError(callbackMessage);
           }
