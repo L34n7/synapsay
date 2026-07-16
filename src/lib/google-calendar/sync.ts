@@ -1,0 +1,509 @@
+import { GoogleCalendarError, googleCalendarFetch, getGoogleCalendarIntegration } from "@/lib/google-calendar/client";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+type GoogleCalendarEntry = {
+  id: string;
+  summary?: string;
+  description?: string;
+  primary?: boolean;
+  accessRole?: string;
+  timeZone?: string;
+  backgroundColor?: string;
+  selected?: boolean;
+};
+
+type GoogleEvent = {
+  id: string;
+  status?: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  htmlLink?: string;
+  etag?: string;
+  updated?: string;
+  eventType?: string;
+  start?: { date?: string; dateTime?: string; timeZone?: string };
+  end?: { date?: string; dateTime?: string; timeZone?: string };
+  reminders?: {
+    useDefault?: boolean;
+    overrides?: Array<{ method?: string; minutes?: number }>;
+  };
+  extendedProperties?: { private?: Record<string, string> };
+};
+
+type TaskForGoogle = {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string;
+  status: string;
+  scheduled_at: string | null;
+  due_at: string | null;
+  all_day: boolean;
+  timezone: string;
+  updated_at: string;
+  reminders?: Array<{ remind_at: string; status: string }>;
+};
+
+type EventLink = {
+  id: string;
+  user_id: string;
+  task_id: string;
+  calendar_id: string;
+  google_event_id: string;
+  google_event_etag: string | null;
+  google_event_updated_at: string | null;
+  google_html_link: string | null;
+};
+
+const TASK_SELECT =
+  "id, user_id, title, description, status, scheduled_at, due_at, all_day, timezone, updated_at, reminders(remind_at, status)";
+
+function encodePath(value: string) {
+  return encodeURIComponent(value);
+}
+
+function dateKey(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(value));
+}
+
+function addDays(date: string, amount: number) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
+}
+
+function offsetForDate(date: string, timeZone: string) {
+  const value = new Date(`${date}T12:00:00Z`);
+  const part = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(value)
+    .find((item) => item.type === "timeZoneName")?.value;
+  const match = part?.match(/GMT([+-]\d{2}:\d{2})/);
+  return match?.[1] ?? "Z";
+}
+
+function allDayStart(date: string, timeZone: string) {
+  return new Date(`${date}T00:00:00${offsetForDate(date, timeZone)}`).toISOString();
+}
+
+function eventDates(event: GoogleEvent, fallbackTimeZone: string) {
+  const timeZone = event.start?.timeZone ?? event.end?.timeZone ?? fallbackTimeZone;
+  if (event.start?.date) {
+    const scheduledAt = allDayStart(event.start.date, timeZone);
+    const exclusiveEnd = event.end?.date
+      ? allDayStart(event.end.date, timeZone)
+      : allDayStart(addDays(event.start.date, 1), timeZone);
+    const dueAt = new Date(exclusiveEnd).getTime() - 1_000 > new Date(scheduledAt).getTime()
+      ? new Date(new Date(exclusiveEnd).getTime() - 1_000).toISOString()
+      : null;
+    return { scheduledAt, dueAt, allDay: true, timeZone };
+  }
+  const scheduledAt = event.start?.dateTime
+    ? new Date(event.start.dateTime).toISOString()
+    : null;
+  const dueAt = event.end?.dateTime ? new Date(event.end.dateTime).toISOString() : null;
+  return {
+    scheduledAt,
+    dueAt: dueAt && scheduledAt && dueAt >= scheduledAt ? dueAt : null,
+    allDay: false,
+    timeZone,
+  };
+}
+
+function googleReminder(task: TaskForGoogle, start: string) {
+  const reminder = (task.reminders ?? []).find((item) => item.status === "scheduled");
+  if (!reminder) return undefined;
+  const minutes = Math.round(
+    (new Date(start).getTime() - new Date(reminder.remind_at).getTime()) / 60_000,
+  );
+  if (minutes < 0 || minutes > 40_320) return undefined;
+  return { useDefault: false, overrides: [{ method: "popup", minutes }] };
+}
+
+function taskAsGoogleEvent(task: TaskForGoogle) {
+  const start = task.scheduled_at ?? task.due_at;
+  if (!start) return null;
+  const timeZone = task.timezone || "America/Sao_Paulo";
+  const common = {
+    summary: task.title,
+    description: task.description || undefined,
+    extendedProperties: { private: { synapsayTaskId: task.id } },
+    reminders: googleReminder(task, start),
+  };
+  if (task.all_day) {
+    const startDate = dateKey(start, timeZone);
+    const dueDate = task.due_at ? dateKey(task.due_at, timeZone) : startDate;
+    return {
+      ...common,
+      start: { date: startDate },
+      end: { date: addDays(dueDate < startDate ? startDate : dueDate, 1) },
+    };
+  }
+  const endCandidate = task.due_at ? new Date(task.due_at).getTime() : 0;
+  const startTime = new Date(start).getTime();
+  const end = new Date(endCandidate > startTime ? endCandidate : startTime + 3_600_000);
+  return {
+    ...common,
+    start: { dateTime: new Date(start).toISOString(), timeZone },
+    end: { dateTime: end.toISOString(), timeZone },
+  };
+}
+
+async function saveEventLink({
+  userId,
+  taskId,
+  calendarId,
+  event,
+}: {
+  userId: string;
+  taskId: string;
+  calendarId: string;
+  event: GoogleEvent;
+}) {
+  const { error } = await createAdminClient().from("google_calendar_event_links").upsert(
+    {
+      user_id: userId,
+      task_id: taskId,
+      calendar_id: calendarId,
+      google_event_id: event.id,
+      google_event_etag: event.etag ?? null,
+      google_event_updated_at: event.updated ?? null,
+      google_html_link: event.htmlLink ?? null,
+      last_synced_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,calendar_id,google_event_id" },
+  );
+  if (error) throw new GoogleCalendarError(error.message);
+}
+
+export async function listGoogleCalendars(userId: string) {
+  const calendars: GoogleCalendarEntry[] = [];
+  let pageToken = "";
+  do {
+    const params = new URLSearchParams({ maxResults: "250", showHidden: "false" });
+    if (pageToken) params.set("pageToken", pageToken);
+    const payload = await googleCalendarFetch<{
+      items?: GoogleCalendarEntry[];
+      nextPageToken?: string;
+    }>({ userId, path: `/users/me/calendarList?${params}` });
+    calendars.push(...(payload.items ?? []));
+    pageToken = payload.nextPageToken ?? "";
+  } while (pageToken && calendars.length < 1_000);
+
+  return calendars
+    .filter((calendar) => ["owner", "writer"].includes(calendar.accessRole ?? ""))
+    .map((calendar) => ({
+      id: calendar.id,
+      name: calendar.summary ?? calendar.id,
+      primary: calendar.primary === true,
+      timezone: calendar.timeZone ?? "America/Sao_Paulo",
+      color: calendar.backgroundColor ?? null,
+    }))
+    .sort((a, b) => Number(b.primary) - Number(a.primary) || a.name.localeCompare(b.name));
+}
+
+export async function syncTaskToGoogle(userId: string, taskId: string, force = false) {
+  const integration = await getGoogleCalendarIntegration(userId);
+  if (!integration) return { skipped: true };
+  if (
+    (!integration.sync_enabled && !force) ||
+    integration.sync_direction === "google_to_synapsay"
+  ) {
+    return { skipped: true };
+  }
+
+  const admin = createAdminClient();
+  const [{ data: task, error: taskError }, { data: existingLink }] = await Promise.all([
+    admin.from("tasks").select(TASK_SELECT).eq("id", taskId).eq("user_id", userId).maybeSingle(),
+    admin
+      .from("google_calendar_event_links")
+      .select("*")
+      .eq("task_id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+  if (taskError) throw new GoogleCalendarError(taskError.message);
+  if (!task) return { skipped: true };
+  const typedTask = task as TaskForGoogle;
+  const link = existingLink as EventLink | null;
+
+  if (typedTask.status === "cancelled") {
+    if (link) await deleteGoogleEventLink(userId, link);
+    return { deleted: Boolean(link) };
+  }
+  if (typedTask.status === "completed") return { skipped: true };
+  const body = taskAsGoogleEvent(typedTask);
+  if (!body) return { skipped: true };
+
+  let event: GoogleEvent;
+  if (link) {
+    try {
+      event = await googleCalendarFetch<GoogleEvent>({
+        userId,
+        path: `/calendars/${encodePath(link.calendar_id)}/events/${encodePath(link.google_event_id)}?sendUpdates=none`,
+        method: "PATCH",
+        body,
+      });
+    } catch (reason) {
+      if (!(reason instanceof GoogleCalendarError) || reason.status !== 404) throw reason;
+      await admin.from("google_calendar_event_links").delete().eq("id", link.id);
+      event = await googleCalendarFetch<GoogleEvent>({
+        userId,
+        path: `/calendars/${encodePath(integration.selected_calendar_id)}/events?sendUpdates=none`,
+        method: "POST",
+        body,
+      });
+    }
+  } else {
+    event = await googleCalendarFetch<GoogleEvent>({
+      userId,
+      path: `/calendars/${encodePath(integration.selected_calendar_id)}/events?sendUpdates=none`,
+      method: "POST",
+      body,
+    });
+  }
+  await saveEventLink({
+    userId,
+    taskId,
+    calendarId: link?.calendar_id ?? integration.selected_calendar_id,
+    event,
+  });
+  return { eventId: event.id, htmlLink: event.htmlLink ?? null };
+}
+
+async function deleteGoogleEventLink(userId: string, link: EventLink) {
+  try {
+    await googleCalendarFetch<null>({
+      userId,
+      path: `/calendars/${encodePath(link.calendar_id)}/events/${encodePath(link.google_event_id)}?sendUpdates=none`,
+      method: "DELETE",
+    });
+  } catch (reason) {
+    if (!(reason instanceof GoogleCalendarError) || reason.status !== 404) throw reason;
+  }
+  await createAdminClient().from("google_calendar_event_links").delete().eq("id", link.id);
+}
+
+export async function deleteTaskFromGoogle(userId: string, taskId: string) {
+  const integration = await getGoogleCalendarIntegration(userId);
+  if (!integration?.sync_enabled || integration.sync_direction === "google_to_synapsay") return;
+  const { data } = await createAdminClient()
+    .from("google_calendar_event_links")
+    .select("*")
+    .eq("task_id", taskId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (data) await deleteGoogleEventLink(userId, data as EventLink);
+}
+
+async function listChangedEvents(userId: string, calendarId: string, lastSyncAt: string | null) {
+  const events: GoogleEvent[] = [];
+  let pageToken = "";
+  do {
+    const params = new URLSearchParams({
+      maxResults: "500",
+      singleEvents: "true",
+      showDeleted: "true",
+      timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      timeMax: new Date(Date.now() + 366 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    if (lastSyncAt) {
+      params.set(
+        "updatedMin",
+        new Date(new Date(lastSyncAt).getTime() - 5 * 60_000).toISOString(),
+      );
+    } else {
+      params.set("orderBy", "startTime");
+    }
+    if (pageToken) params.set("pageToken", pageToken);
+    const payload = await googleCalendarFetch<{
+      items?: GoogleEvent[];
+      nextPageToken?: string;
+    }>({ userId, path: `/calendars/${encodePath(calendarId)}/events?${params}` });
+    events.push(...(payload.items ?? []));
+    pageToken = payload.nextPageToken ?? "";
+  } while (pageToken && events.length < 2_000);
+  return events;
+}
+
+async function importGoogleEvents({
+  userId,
+  calendarId,
+  calendarTimezone,
+  lastSyncAt,
+}: {
+  userId: string;
+  calendarId: string;
+  calendarTimezone: string;
+  lastSyncAt: string | null;
+}) {
+  const admin = createAdminClient();
+  const events = await listChangedEvents(userId, calendarId, lastSyncAt);
+  const { data: linksData, error: linksError } = await admin
+    .from("google_calendar_event_links")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("calendar_id", calendarId);
+  if (linksError) throw new GoogleCalendarError(linksError.message);
+  const linkByEvent = new Map(
+    ((linksData ?? []) as EventLink[]).map((link) => [link.google_event_id, link]),
+  );
+  let imported = 0;
+  let updated = 0;
+  let cancelled = 0;
+
+  for (const event of events) {
+    const link = linkByEvent.get(event.id);
+    if (event.status === "cancelled") {
+      if (link) {
+        await admin
+          .from("tasks")
+          .update({ status: "cancelled", completed_at: null })
+          .eq("id", link.task_id)
+          .eq("user_id", userId);
+        await admin
+          .from("reminders")
+          .update({ status: "cancelled" })
+          .eq("task_id", link.task_id)
+          .eq("status", "scheduled");
+        cancelled += 1;
+      }
+      continue;
+    }
+    if (["birthday", "workingLocation"].includes(event.eventType ?? "")) continue;
+    const dates = eventDates(event, calendarTimezone);
+    if (!dates.scheduledAt) continue;
+    const title = (event.summary?.trim() || "Evento sem título").slice(0, 160);
+    const description = [event.description?.trim(), event.location ? `Local: ${event.location}` : ""]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000);
+
+    let taskId = link?.task_id ?? event.extendedProperties?.private?.synapsayTaskId;
+    if (taskId && !link) {
+      const { data: ownedTask } = await admin
+        .from("tasks")
+        .select("id")
+        .eq("id", taskId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!ownedTask) taskId = undefined;
+    }
+
+    if (taskId) {
+      const { error } = await admin
+        .from("tasks")
+        .update({
+          title,
+          description,
+          scheduled_at: dates.scheduledAt,
+          due_at: dates.dueAt,
+          all_day: dates.allDay,
+          timezone: dates.timeZone,
+        })
+        .eq("id", taskId)
+        .eq("user_id", userId);
+      if (error) throw new GoogleCalendarError(error.message);
+      updated += 1;
+    } else {
+      const { data: created, error } = await admin
+        .from("tasks")
+        .insert({
+          user_id: userId,
+          title,
+          description,
+          scheduled_at: dates.scheduledAt,
+          due_at: dates.dueAt,
+          all_day: dates.allDay,
+          timezone: dates.timeZone,
+          created_by: "integration",
+        })
+        .select("id")
+        .single();
+      if (error || !created) throw new GoogleCalendarError(error?.message ?? "Falha ao importar evento.");
+      taskId = created.id;
+      imported += 1;
+    }
+
+    const override = event.reminders?.overrides
+      ?.filter((item) => item.method === "popup" && Number.isFinite(item.minutes))
+      .sort((a, b) => (a.minutes ?? 0) - (b.minutes ?? 0))[0];
+    if (taskId && override?.minutes !== undefined) {
+      const remindAt = new Date(
+        new Date(dates.scheduledAt).getTime() - override.minutes * 60_000,
+      ).toISOString();
+      await admin.from("reminders").upsert(
+        { task_id: taskId, user_id: userId, remind_at: remindAt, channel: "browser" },
+        { onConflict: "task_id,remind_at,channel", ignoreDuplicates: true },
+      );
+    }
+    await saveEventLink({ userId, taskId: taskId!, calendarId, event });
+  }
+  return { received: events.length, imported, updated, cancelled };
+}
+
+async function exportSynapsayTasks(userId: string, lastSyncAt: string | null) {
+  const admin = createAdminClient();
+  let query = admin
+    .from("tasks")
+    .select(TASK_SELECT)
+    .eq("user_id", userId)
+    .in("status", ["pending", "in_progress"])
+    .or("scheduled_at.not.is.null,due_at.not.is.null")
+    .order("updated_at", { ascending: true })
+    .limit(500);
+  if (lastSyncAt) query = query.gte("updated_at", lastSyncAt);
+  const { data, error } = await query;
+  if (error) throw new GoogleCalendarError(error.message);
+  let exported = 0;
+  for (const task of (data ?? []) as TaskForGoogle[]) {
+    await syncTaskToGoogle(userId, task.id, true);
+    exported += 1;
+  }
+  return exported;
+}
+
+export async function syncGoogleCalendarForUser(userId: string, force = false) {
+  const integration = await getGoogleCalendarIntegration(userId);
+  if (!integration) {
+    throw new GoogleCalendarError("Google Agenda não conectado.", 404, "google_not_connected");
+  }
+  if (!integration.sync_enabled && !force) return { skipped: true };
+
+  const startedAt = new Date().toISOString();
+  try {
+    const pull =
+      integration.sync_direction === "synapsay_to_google"
+        ? { received: 0, imported: 0, updated: 0, cancelled: 0 }
+        : await importGoogleEvents({
+            userId,
+            calendarId: integration.selected_calendar_id,
+            calendarTimezone: integration.selected_calendar_timezone,
+            lastSyncAt: integration.last_sync_at,
+          });
+    const exported =
+      integration.sync_direction === "google_to_synapsay"
+        ? 0
+        : await exportSynapsayTasks(userId, integration.last_sync_at);
+    await createAdminClient()
+      .from("google_calendar_integrations")
+      .update({ last_sync_at: startedAt, last_sync_error: null })
+      .eq("user_id", userId);
+    return { ...pull, exported, syncedAt: startedAt };
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : "Falha ao sincronizar agendas.";
+    await createAdminClient()
+      .from("google_calendar_integrations")
+      .update({ last_sync_error: message.slice(0, 1000) })
+      .eq("user_id", userId);
+    throw reason;
+  }
+}

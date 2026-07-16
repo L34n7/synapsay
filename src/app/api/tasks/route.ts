@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
 import {
   isTaskStatus,
   normalizePriority,
@@ -139,5 +140,17 @@ export async function POST(request: Request) {
     .eq("user_id", userId)
     .single();
 
-  return NextResponse.json({ task: created ?? task }, { status: 201 });
+  let googleSyncWarning: string | null = null;
+  if (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      await syncTaskToGoogle(userId, task.id);
+    } catch (reason) {
+      googleSyncWarning =
+        reason instanceof Error ? reason.message : "Falha ao sincronizar com o Google Agenda.";
+    }
+  }
+  return NextResponse.json(
+    { task: created ?? task, googleSyncWarning },
+    { status: 201 },
+  );
 }

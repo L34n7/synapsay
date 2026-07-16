@@ -15,6 +15,22 @@ OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
 OPENAI_TEXT_MODEL=gpt-5.6-luna
 OPENAI_MEMORY_MODEL=gpt-5.6-luna
 OPENAI_MEMORY_CONFLICT_MODEL=gpt-5.6-luna
+
+# Backend privado. Copie em Supabase > Project Settings > API Keys.
+# Nunca use NEXT_PUBLIC_ neste nome.
+SUPABASE_SECRET_KEY=
+# Também é aceito o nome legado: SUPABASE_SERVICE_ROLE_KEY
+
+# Google Calendar OAuth (todos são exclusivos do servidor)
+GOOGLE_CALENDAR_CLIENT_ID=
+GOOGLE_CALENDAR_CLIENT_SECRET=
+GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:3000/api/integracoes/google-calendar/callback
+# Em produção, use a callback https://synapsay.vercel.app/api/integracoes/google-calendar/callback
+# Gere uma chave longa e aleatória, por exemplo: openssl rand -base64 48
+GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY=
+
+# Protege a rotina automática diária da Vercel (mínimo de 16 caracteres)
+CRON_SECRET=
 ```
 
 No Supabase, aplique em ordem os arquivos da pasta `supabase/migrations`. A etapa de memória depende de `202607130003_memory_engine.sql`; o histórico avançado e a retomada de conversas dependem de `202607130004_conversation_history.sql`.
@@ -24,6 +40,16 @@ Após cada fala do usuário, o cérebro de memória analisa a conversa em segund
 O histórico está disponível em `/historico`. Conversas finalizadas recebem um título automático, podem ser pesquisadas por título ou conteúdo, e podem ser retomadas com as últimas mensagens como contexto. Conversas sem atividade por 30 minutos são encerradas quando o histórico é sincronizado.
 
 A Synapsay também possui busca global de histórico. Pedidos como **“lembra disso?”**, **“eu falei sobre isso?”** e **“traga mais mensagens antes/depois”** são interpretados pela IA. A busca retorna trechos apenas das conversas do usuário autenticado, com âncoras para expansão progressiva. Quando nada é encontrado, a assistente informa isso sem inventar lembranças.
+
+## Google Agenda
+
+Antes de conectar uma conta, aplique a migration `20260716064051_google_calendar_integration.sql`. Depois, abra `/agenda` e use **Conectar Google Agenda**.
+
+A integração permite escolher qualquer agenda em que a conta tenha permissão de escrita e oferece três fluxos: bidirecional, somente Google → Synapsay ou somente Synapsay → Google. A sincronização acontece ao abrir a agenda, pelo botão **Sincronizar agora**, sempre que uma tarefa local é criada, alterada ou cancelada e pela rotina diária da Vercel configurada em `vercel.json`. Tarefas criadas pela assistente também são enviadas automaticamente.
+
+O cron padrão roda diariamente às 09:00 UTC (06:00 em Brasília), frequência compatível com o plano Hobby da Vercel. Em um plano Pro, a expressão pode ser aumentada para uma execução horária (`0 * * * *`).
+
+Os tokens OAuth são criptografados com AES-256-GCM antes de serem armazenados. As tabelas da integração não concedem acesso aos papéis `anon` e `authenticated`; somente o backend com `service_role` pode lê-las.
 
 No dashboard, o seletor **Voz / Texto** mantém os dois canais na mesma conversa. O chat por texto usa streaming, permite interromper e copiar respostas, e reutiliza o mesmo identificador ao tentar novamente para evitar mensagens duplicadas. Essa etapa depende de `202607130005_text_chat.sql`.
 

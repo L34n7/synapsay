@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { analyzeAndApplyTaskMessage } from "@/lib/tasks/brain";
+import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -48,6 +49,14 @@ export async function POST(request: Request) {
       sourceMessageId,
       currentMessage: message,
     });
+    if (
+      (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+      result.applied.length
+    ) {
+      await Promise.allSettled(
+        result.applied.map((item) => syncTaskToGoogle(userId, item.taskId)),
+      );
+    }
     return NextResponse.json(result);
   } catch (reason) {
     console.error("Falha no cérebro de tarefas:", reason);
@@ -57,4 +66,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

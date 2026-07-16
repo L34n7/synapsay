@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TaskRecord } from "@/lib/tasks/types";
+import GoogleCalendarIntegration from "./GoogleCalendarIntegration";
 import styles from "./agenda.module.css";
 
 type Filter = "today" | "upcoming" | "completed" | "all";
@@ -192,6 +193,7 @@ export default function AgendaPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao criar tarefa.");
       setTasks((current) => [...current, data.task]);
+      if (data.googleSyncWarning) setError(`Tarefa salva. Google Agenda: ${data.googleSyncWarning}`);
       setAdding(false);
       setDraft(emptyDraft);
     } catch (reason) {
@@ -215,6 +217,7 @@ export default function AgendaPage() {
       setTasks((current) =>
         current.map((task) => (task.id === id ? data.task : task)),
       );
+      if (data.googleSyncWarning) setError(`Tarefa atualizada. Google Agenda: ${data.googleSyncWarning}`);
       setEditingId(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao atualizar tarefa.");
@@ -243,6 +246,7 @@ export default function AgendaPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao excluir tarefa.");
       setTasks((current) => current.filter((item) => item.id !== task.id));
+      if (data.googleSyncWarning) setError(`Tarefa excluída. Google Agenda: ${data.googleSyncWarning}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao excluir tarefa.");
     } finally {
@@ -306,6 +310,8 @@ export default function AgendaPage() {
           </button>
           <button className={styles.addButton} onClick={beginAdd}>+ NOVA TAREFA</button>
         </div>
+
+        <GoogleCalendarIntegration onSynced={loadTasks} />
 
         <div className={styles.weekStrip}>
           {week.map((date) => {

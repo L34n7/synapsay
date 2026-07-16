@@ -6,6 +6,10 @@ Antes de testar esta versão, abra o **SQL Editor** do projeto correto no Supaba
 
 `supabase/migrations/20260715193000_tasks_reminders_agenda.sql`
 
+Para ativar também a integração com o Google Agenda, execute depois:
+
+`supabase/migrations/20260716064051_google_calendar_integration.sql`
+
 A migration cria `tasks` e `reminders`, índices, validações, permissões e políticas RLS que isolam os dados de cada usuário.
 
 ## O que testar
@@ -16,6 +20,8 @@ A migration cria `tasks` e `reminders`, índices, validações, permissões e po
 4. Pergunte: “O que tenho para hoje?”
 5. Diga: “Concluí a tarefa de falar com meu primo.”
 6. Reabra o assistente de voz com uma tarefa de hoje pendente; a Synapsay deve avisá-la no início.
+7. Em `/agenda`, conecte uma conta Google, selecione uma agenda editável e clique em **Sincronizar agora**.
+8. Crie e edite um compromisso nos dois sistemas e confirme a atualização bidirecional.
 
 ## Limite desta primeira versão
 

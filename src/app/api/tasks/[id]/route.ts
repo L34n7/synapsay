@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { deleteTaskFromGoogle, syncTaskToGoogle } from "@/lib/google-calendar/sync";
 import {
   isTaskStatus,
   normalizePriority,
@@ -130,7 +131,16 @@ export async function PATCH(request: Request, context: RouteContext<"/api/tasks/
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
-  return NextResponse.json({ task: refreshed ?? task });
+  let googleSyncWarning: string | null = null;
+  if (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      await syncTaskToGoogle(userId, id);
+    } catch (reason) {
+      googleSyncWarning =
+        reason instanceof Error ? reason.message : "Falha ao sincronizar com o Google Agenda.";
+    }
+  }
+  return NextResponse.json({ task: refreshed ?? task, googleSyncWarning });
 }
 
 export async function DELETE(_request: Request, context: RouteContext<"/api/tasks/[id]">) {
@@ -144,6 +154,15 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/task
   if (!userId) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
+  let googleSyncWarning: string | null = null;
+  if (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      await deleteTaskFromGoogle(userId, id);
+    } catch (reason) {
+      googleSyncWarning =
+        reason instanceof Error ? reason.message : "O evento não pôde ser excluído do Google Agenda.";
+    }
+  }
   const { error, count } = await supabase
     .from("tasks")
     .delete({ count: "exact" })
@@ -155,6 +174,5 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/task
       { status: error ? 500 : 404 },
     );
   }
-  return NextResponse.json({ deleted: true });
+  return NextResponse.json({ deleted: true, googleSyncWarning });
 }
-

@@ -14,6 +14,7 @@ import {
   formatTaskBrainResult,
   type TaskBrainResult,
 } from "@/lib/tasks/brain";
+import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -168,6 +169,14 @@ export async function POST(request: Request) {
       sourceMessageId: userMessageId,
       currentMessage: content,
     });
+    if (
+      (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+      taskBrainResult.applied.length
+    ) {
+      await Promise.allSettled(
+        taskBrainResult.applied.map((item) => syncTaskToGoogle(userId, item.taskId)),
+      );
+    }
   } catch (reason) {
     console.warn("Agenda automática indisponível nesta mensagem:", reason);
   }
