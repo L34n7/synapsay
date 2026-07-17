@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { AI_MODELS } from "@/lib/ai/models";
+import { refreshContinuityCache } from "@/lib/continuity/cache";
 import { embedHistoryMessage } from "@/lib/history/embeddings";
 import { interpretHistoryIntent } from "@/lib/history/intent";
 import {
@@ -541,6 +542,16 @@ export async function POST(request: Request) {
         .update({ last_message_at: new Date().toISOString() })
         .eq("id", conversationId)
         .eq("user_id", userId);
+
+      if (finalStatus === "completed") {
+        after(async () => {
+          await refreshContinuityCache({ supabase, userId, conversationId }).catch(
+            (reason) => {
+              console.warn("Continuidade automática indisponível no texto:", reason);
+            },
+          );
+        });
+      }
 
       if (streamError) {
         send({ type: "error", message: streamError, assistantId: assistantMessageId });

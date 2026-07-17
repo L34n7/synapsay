@@ -92,6 +92,7 @@ export default function Dashboard() {
     content: string;
     eventId: string;
   } | null>(null);
+  const continuitySyncTimerRef = useRef<number | null>(null);
   const latestUserMessageIdRef = useRef<string | null>(null);
   const latestUserTranscriptRef = useRef("");
   const connectionAttemptRef = useRef(0);
@@ -169,6 +170,30 @@ export default function Dashboard() {
     }
   }, []);
 
+  const scheduleContinuitySync = useCallback((currentConversationId: string, delayMs = 4_000) => {
+    if (continuitySyncTimerRef.current) {
+      window.clearTimeout(continuitySyncTimerRef.current);
+    }
+    continuitySyncTimerRef.current = window.setTimeout(() => {
+      continuitySyncTimerRef.current = null;
+      void fetch(`/api/conversations/${currentConversationId}/continuity/auto`, {
+        method: "POST",
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const data = await response.json().catch(() => null);
+            console.warn(
+              "Falha ao atualizar continuidade automática:",
+              data?.error ?? response.status,
+            );
+          }
+        })
+        .catch((reason) => {
+          console.warn("Falha ao iniciar continuidade automática:", reason);
+        });
+    }, delayMs);
+  }, []);
+
   const saveMessage = useCallback(
     (
       role: "user" | "assistant",
@@ -210,6 +235,7 @@ export default function Dashboard() {
             latestUserMessageIdRef.current = data.message.id;
           }
           setHistoryStatus("saved");
+          scheduleContinuitySync(conversationId, role === "assistant" ? 1_200 : 4_000);
 
           // A fala já foi salva. Agora o cérebro analisa a conversa sem
           // bloquear a resposta de voz e grava somente memórias úteis.
@@ -244,7 +270,7 @@ export default function Dashboard() {
       void task.finally(() => pendingSavesRef.current.delete(task));
       return task;
     },
-    [ensureConversation],
+    [ensureConversation, scheduleContinuitySync],
   );
 
   const executeHistorySearch = useCallback(
@@ -663,6 +689,9 @@ export default function Dashboard() {
       window.clearTimeout(connectTimer);
       window.clearInterval(clockTimer);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      if (continuitySyncTimerRef.current) {
+        window.clearTimeout(continuitySyncTimerRef.current);
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       dataChannelRef.current?.close();
       dataChannelRef.current = null;

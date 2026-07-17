@@ -207,6 +207,8 @@ export async function extractMemories({
         "Crie também um título curto e específico para a conversa, com 3 a 8 palavras, sem aspas e sem pontuação final.",
         "Extraia somente fatos, preferências, metas, projetos, relações, rotinas ou compromissos explicitamente declarados pelo USUÁRIO e úteis em conversas futuras.",
         "Nunca transforme suposições, perguntas, sugestões ou falas do ASSISTENTE em memória.",
+        "Quando o USUÁRIO confirmar uma rotina sugerida pela assistente, como 'sim, toda terça eu vou à padaria', salve como category=routine, memory_type=permanent e importância 4 ou 5 conforme utilidade.",
+        "Para padrões apenas suspeitos, sem confirmação explícita do USUÁRIO, não crie memória permanente.",
         "Ignore saudações, conversa casual, pedidos momentâneos e informações triviais.",
         "Nunca memorize senhas, tokens, números de documentos, dados bancários, códigos de autenticação ou outros segredos.",
         "Cada memória deve ser atômica, objetiva e escrita em terceira pessoa, sem inventar detalhes.",
