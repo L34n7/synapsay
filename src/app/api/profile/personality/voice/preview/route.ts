@@ -9,6 +9,7 @@ import {
   type CommunicationStyle,
 } from "@/lib/personality";
 import { createClient } from "@/lib/supabase/server";
+import { firstProfileName } from "@/lib/user-display-name";
 import { voicePreviewCacheKey } from "@/lib/voice-preview-cache";
 
 export const runtime = "nodejs";
@@ -26,11 +27,6 @@ function isCommunicationStyle(value: unknown): value is CommunicationStyle {
     typeof value === "string" &&
     COMMUNICATION_STYLES.includes(value as never)
   );
-}
-
-function firstName(displayName: unknown) {
-  if (typeof displayName !== "string") return "";
-  return displayName.trim().split(/\s+/)[0]?.slice(0, 40) ?? "";
 }
 
 function previewText(name: string, tone: AssistantTone) {
@@ -110,7 +106,7 @@ export async function GET(request: Request) {
       { status: 400 },
     );
   }
-  const name = firstName(profile?.display_name);
+  const name = firstProfileName(profile?.display_name);
   const openAIResponse = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: {
