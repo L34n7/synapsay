@@ -14,6 +14,7 @@ import {
   type CommunicationStyle,
   type ResponseDetail,
 } from "@/lib/personality";
+import { createClient } from "@/lib/supabase/client";
 import styles from "./personalidade.module.css";
 
 const PERSONALITY_ENDPOINT = "/api/profile/personality";
@@ -207,6 +208,12 @@ export default function PersonalityPage() {
     setError(false);
   }
 
+  async function signOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  }
+
   return (
     <main className={styles.page}>
       <div className={styles.grid} />
@@ -214,7 +221,16 @@ export default function PersonalityPage() {
 
       <header className={styles.header}>
         <a href="/dashboard" className={styles.brand}><span>S</span>synap<b>say</b></a>
-        <nav><a href="/dashboard">ASSISTENTE</a><a href="/memorias">MEMÓRIAS</a><a href="/agenda">AGENDA</a><a href="/historico">HISTÓRICO</a><i /> PERFIL SINCRONIZADO</nav>
+        <nav>
+          <a href="/dashboard">ASSISTENTE</a>
+          <a href="/memorias">MEMÓRIAS</a>
+          <a href="/agenda">AGENDA</a>
+          <a href="/historico">HISTÓRICO</a>
+          <i /> PERFIL SINCRONIZADO
+          <button type="button" className={styles.logoutButton} onClick={() => void signOut()}>
+            SAIR
+          </button>
+        </nav>
       </header>
 
       <section className={styles.shell}>

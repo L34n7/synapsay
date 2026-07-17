@@ -33,6 +33,7 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const authenticated = Boolean(data?.claims?.sub);
   const path = request.nextUrl.pathname;
+  const apiPath = path.startsWith("/api");
   const privatePath =
     path.startsWith("/dashboard") ||
     path.startsWith("/memorias") ||
@@ -47,7 +48,13 @@ export async function updateSession(request: NextRequest) {
     return copyCookies(response, NextResponse.redirect(url));
   }
 
-  if (authenticated && data?.claims?.sub) {
+  if (
+    authenticated &&
+    data?.claims?.sub &&
+    !apiPath &&
+    path !== "/personalidade" &&
+    !path.startsWith("/auth/callback")
+  ) {
     const { data: profile } = await supabase
       .from("profiles")
       .select("onboarding_completed")
@@ -55,7 +62,7 @@ export async function updateSession(request: NextRequest) {
       .maybeSingle();
     const needsOnboarding = profile?.onboarding_completed === false;
 
-    if (needsOnboarding && path !== "/personalidade") {
+    if (needsOnboarding) {
       return copyCookies(
         response,
         NextResponse.redirect(new URL("/personalidade?onboarding=1", request.url)),
