@@ -24,6 +24,8 @@ type VoicePreferenceOutput = {
   status?: string;
   currentVoice?: string;
   previewVoice?: string;
+  displayName?: string;
+  birthday?: string;
 };
 
 type RealtimeEvent = {
@@ -471,14 +473,19 @@ export default function Dashboard() {
         return false;
       }
 
-      let args: { action?: string; voice?: string } = {};
+      let args: {
+        action?: string;
+        voice?: string;
+        displayName?: string;
+        birthday?: string;
+      } = {};
       try {
         args = JSON.parse(call.arguments || "{}") as typeof args;
       } catch {
         args = {};
       }
 
-      setTranscript("Certo, vamos ajustar minha voz.");
+      setTranscript("Certo, vou ajustar isso.");
       let output: unknown;
       try {
         const response = await fetch("/api/profile/personality/voice", {
@@ -487,6 +494,8 @@ export default function Dashboard() {
           body: JSON.stringify({
             action: args.action ?? "list",
             voice: args.voice ?? null,
+            displayName: args.displayName ?? null,
+            birthday: args.birthday ?? null,
           }),
         });
         output = await response.json();

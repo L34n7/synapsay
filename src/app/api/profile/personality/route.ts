@@ -8,12 +8,16 @@ import {
   normalizeProhibitedTopics,
 } from "@/lib/personality";
 import { createClient } from "@/lib/supabase/server";
+import {
+  validateBirthdayInput,
+  validateDisplayNameInput,
+} from "@/lib/user-display-name";
 import { voicePreviewCacheKey } from "@/lib/voice-preview-cache";
 
 export const runtime = "nodejs";
 
 const PROFILE_COLUMNS =
-  "display_name, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed" as const;
+  "display_name, birthday, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed" as const;
 
 async function authenticatedProfile() {
   const supabase = await createClient();
@@ -33,7 +37,7 @@ export async function GET() {
 
   if (error) {
     return NextResponse.json(
-      { error: "Não foi possível carregar a personalidade. Verifique se a migração 006 foi aplicada." },
+      { error: "Não foi possível carregar a personalidade. Verifique se as migrations de perfil foram aplicadas." },
       { status: 500 },
     );
   }
@@ -49,6 +53,8 @@ export async function PATCH(request: Request) {
   if (!userId) return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
 
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const displayName = validateDisplayNameInput(body?.displayName);
+  const birthday = validateBirthdayInput(body?.birthday);
   const assistantName = typeof body?.assistantName === "string" ? body.assistantName.trim() : "";
   const boundaries = typeof body?.boundaries === "string" ? body.boundaries.trim() : "";
   const customInstructions = typeof body?.customInstructions === "string" ? body.customInstructions.trim() : "";
@@ -58,6 +64,8 @@ export async function PATCH(request: Request) {
   const tone = typeof body?.tone === "string" ? body.tone : "";
   const prohibitedTopics = normalizeProhibitedTopics(body?.prohibitedTopics);
 
+  if (displayName.error) return NextResponse.json({ error: displayName.error }, { status: 400 });
+  if (birthday.error) return NextResponse.json({ error: birthday.error }, { status: 400 });
   if (assistantName.length < 2 || assistantName.length > 40) return NextResponse.json({ error: "O nome deve ter entre 2 e 40 caracteres." }, { status: 400 });
   if (!ASSISTANT_VOICES.includes(preferredVoice as never)) return NextResponse.json({ error: "Voz inválida." }, { status: 400 });
   if (!COMMUNICATION_STYLES.includes(communicationStyle as never)) return NextResponse.json({ error: "Estilo inválido." }, { status: 400 });
@@ -68,6 +76,8 @@ export async function PATCH(request: Request) {
   const { data, error } = await supabase
     .from("profiles")
     .update({
+      display_name: displayName.value,
+      birthday: birthday.value,
       assistant_name: assistantName,
       preferred_voice: preferredVoice,
       communication_style: communicationStyle,
@@ -84,7 +94,7 @@ export async function PATCH(request: Request) {
 
   if (error) {
     return NextResponse.json(
-      { error: "Não foi possível salvar a personalidade. Verifique a migração 006." },
+      { error: "Não foi possível salvar a personalidade. Verifique as migrations de perfil." },
       { status: 500 },
     );
   }

@@ -1,3 +1,5 @@
+import { profileBirthday, profileDisplayName } from "@/lib/user-display-name";
+
 export const ASSISTANT_VOICES = [
   "marin",
   "cedar",
@@ -93,6 +95,8 @@ export type ResponseDetail = (typeof RESPONSE_DETAILS)[number];
 export type AssistantTone = (typeof ASSISTANT_TONES)[number];
 
 export type AssistantPersonality = {
+  displayName: string;
+  birthday: string;
   assistantName: string;
   preferredVoice: AssistantVoice;
   communicationStyle: CommunicationStyle;
@@ -105,6 +109,8 @@ export type AssistantPersonality = {
 };
 
 export type PersonalityRow = {
+  display_name?: unknown;
+  birthday?: unknown;
   assistant_name?: unknown;
   preferred_voice?: unknown;
   communication_style?: unknown;
@@ -117,6 +123,8 @@ export type PersonalityRow = {
 };
 
 export const DEFAULT_PERSONALITY: AssistantPersonality = {
+  displayName: "",
+  birthday: "",
   assistantName: "Synapsay",
   preferredVoice: "marin",
   communicationStyle: "balanced",
@@ -158,6 +166,8 @@ export function normalizePersonalityRow(
   const assistantName = cleanText(row?.assistant_name, 40);
 
   return {
+    displayName: profileDisplayName(row?.display_name),
+    birthday: profileBirthday(row?.birthday),
     assistantName:
       assistantName.length >= 2
         ? assistantName

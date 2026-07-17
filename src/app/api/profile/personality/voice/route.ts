@@ -6,6 +6,10 @@ import {
   voiceOptionsForAssistant,
 } from "@/lib/personality";
 import { createClient } from "@/lib/supabase/server";
+import {
+  validateBirthdayInput,
+  validateDisplayNameInput,
+} from "@/lib/user-display-name";
 
 export const runtime = "nodejs";
 
@@ -61,12 +65,14 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     action?: unknown;
     voice?: unknown;
+    displayName?: unknown;
+    birthday?: unknown;
   } | null;
   const action = typeof body?.action === "string" ? body.action : "list";
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("preferred_voice, assistant_name")
+    .select("preferred_voice, assistant_name, display_name, birthday")
     .eq("id", userId)
     .maybeSingle();
 
@@ -80,6 +86,69 @@ export async function POST(request: Request) {
       currentVoice,
       currentVoiceLabel: ASSISTANT_VOICE_OPTIONS[currentVoice].label,
       message: "Troca de voz cancelada. A voz atual foi mantida.",
+    });
+  }
+
+  if (action === "set_display_name") {
+    const displayName = validateDisplayNameInput(body?.displayName);
+    if (displayName.error) {
+      return NextResponse.json({ error: displayName.error }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ display_name: displayName.value })
+      .eq("id", userId)
+      .select("display_name")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: "Não foi possível salvar seu nome agora." },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({
+      status: "saved",
+      displayName: data.display_name,
+      message:
+        "Nome salvo. Confirme naturalmente que vai chamar o usuário por esse nome a partir de agora.",
+    });
+  }
+
+  if (action === "set_birthday") {
+    const birthday = validateBirthdayInput(body?.birthday);
+    if (birthday.error || !birthday.value) {
+      return NextResponse.json(
+        {
+          error:
+            birthday.error ||
+            "Informe a data completa de aniversário no formato AAAA-MM-DD.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ birthday: birthday.value })
+      .eq("id", userId)
+      .select("birthday")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: "Não foi possível salvar seu aniversário agora." },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({
+      status: "saved",
+      birthday: data.birthday,
+      message:
+        "Aniversário salvo. Confirme de forma natural e diga que usará essa informação com discrição no contexto pessoal.",
     });
   }
 

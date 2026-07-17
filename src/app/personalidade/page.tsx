@@ -292,9 +292,13 @@ export default function PersonalityPage() {
   }
 
   function restore() {
-    setForm(DEFAULT_PERSONALITY);
+    setForm((current) => ({
+      ...DEFAULT_PERSONALITY,
+      displayName: current.displayName,
+      birthday: current.birthday,
+    }));
     setTopicsText("");
-    setNotice("Configuração padrão carregada. Clique em salvar para confirmar.");
+    setNotice("Configuração padrão do assistente carregada. Seu nome e aniversário foram mantidos. Clique em salvar para confirmar.");
     setError(false);
   }
 
@@ -326,10 +330,10 @@ export default function PersonalityPage() {
       <section className={styles.shell}>
         <div className={styles.intro}>
           <span>IDENTIDADE NEURAL // 04</span>
-          <h1>{onboardingMode ? "Configure sua" : "Personalidade do"} <em>assistente</em></h1>
+          <h1>{onboardingMode ? "Configure seu" : "Personalidade do"} <em>assistente</em></h1>
           <p>
             {onboardingMode
-              ? "Antes da primeira conversa, escolha nome, voz e estilo para a Synapsay já começar com a sua cara."
+              ? "Antes da primeira conversa, informe como a Synapsay deve te chamar, seu aniversário, voz e estilo."
               : "Defina como sua IA se apresenta, fala e responde. As preferências ficam vinculadas ao seu perfil."}
           </p>
         </div>
@@ -339,7 +343,11 @@ export default function PersonalityPage() {
         <div className={styles.workspace} aria-busy={loading}>
           <div className={styles.forms}>
             <section className={styles.panel}>
-              <div className={styles.panelTitle}><span>01</span><div><h2>Identidade e voz</h2><p>Como o assistente será chamado e ouvido.</p></div></div>
+              <div className={styles.panelTitle}><span>01</span><div><h2>Perfil, identidade e voz</h2><p>Como a Synapsay te chama, lembra seu aniversário e fala com você.</p></div></div>
+              <div className={styles.twoColumns}>
+                <label>COMO DEVO TE CHAMAR?<input value={form.displayName} maxLength={40} disabled={loading} onChange={(event) => setField("displayName", event.target.value)} placeholder="Ex.: Leandro" /><small>{form.displayName.length}/40 caracteres</small></label>
+                <label>DATA DE ANIVERSÁRIO<input value={form.birthday} type="date" disabled={loading} onChange={(event) => setField("birthday", event.target.value)} /><small>Usada para contexto pessoal e saudações futuras.</small></label>
+              </div>
               <div className={styles.twoColumns}>
                 <label>NOME DO ASSISTENTE<input value={form.assistantName} maxLength={40} disabled={loading} onChange={(event) => setField("assistantName", event.target.value)} /><small>{form.assistantName.length}/40 caracteres</small></label>
                 <label>VOZ<select value={form.preferredVoice} disabled={loading} onChange={(event) => setField("preferredVoice", event.target.value as AssistantVoice)}>{ASSISTANT_VOICES.map((voice) => <option key={voice} value={voice}>{voices[voice]}</option>)}</select><small>Aplicada na próxima sessão de voz.</small></label>
@@ -398,6 +406,7 @@ export default function PersonalityPage() {
             <div className={styles.wave}>{Array.from({ length: 25 }, (_, index) => <i key={index} />)}</div>
             <div className={styles.sample}><small>EXEMPLO DE RESPOSTA</small><p>{preview}</p></div>
             <dl><div><dt>ESTILO</dt><dd>{communication[form.communicationStyle].label}</dd></div><div><dt>DETALHE</dt><dd>{details[form.responseDetail]}</dd></div><div><dt>TOM</dt><dd>{tones[form.tone]}</dd></div><div><dt>BLOQUEIOS</dt><dd>{topicsText.split(/[\n,;]+/).filter((value) => value.trim()).length}</dd></div></dl>
+            <dl><div><dt>USUÁRIO</dt><dd>{form.displayName || "Não informado"}</dd></div><div><dt>ANIVERSÁRIO</dt><dd>{form.birthday || "Não informado"}</dd></div></dl>
             <button type="button" onClick={restore} disabled={saving}>RESTAURAR PADRÃO</button>
             <button type="button" className={styles.save} onClick={() => void save()} disabled={saving || loading}>{saving ? "SINCRONIZANDO..." : onboardingMode ? "SALVAR E COMEÇAR" : "SALVAR PERSONALIDADE"}</button>
             <small className={styles.note}>Mudanças de voz entram em vigor na próxima sessão. Pela conversa, a Synapsay também pode demonstrar e trocar a voz de forma guiada.</small>

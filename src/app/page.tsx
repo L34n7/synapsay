@@ -4,6 +4,10 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import {
+  validateBirthdayInput,
+  validateDisplayNameInput,
+} from "@/lib/user-display-name";
 import styles from "./page.module.css";
 
 type Mode = "login" | "signup" | "recovery";
@@ -22,9 +26,19 @@ function LockIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5v2"/></svg>;
 }
 
+function UserIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>;
+}
+
+function CalendarIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M8 3.5V7M16 3.5V7M4 10h16"/></svg>;
+}
+
 export default function Home() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
+  const [displayName, setDisplayName] = useState("");
+  const [birthday, setBirthday] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -48,6 +62,10 @@ export default function Home() {
   function changeMode(next: Mode) {
     setMode(next);
     setPassword("");
+    if (next !== "signup") {
+      setDisplayName("");
+      setBirthday("");
+    }
     setMessage(null);
   }
 
@@ -65,11 +83,27 @@ export default function Home() {
         return;
       }
       if (mode === "signup") {
+        const normalizedDisplayName = validateDisplayNameInput(displayName);
+        const normalizedBirthday = validateBirthdayInput(birthday);
+        if (normalizedDisplayName.error) {
+          setMessage({ ok: false, text: normalizedDisplayName.error });
+          return;
+        }
+        if (normalizedBirthday.error) {
+          setMessage({ ok: false, text: normalizedBirthday.error });
+          return;
+        }
+
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: `${window.location.origin}/auth/callback`,
+            data: {
+              display_name: normalizedDisplayName.value,
+              full_name: normalizedDisplayName.value,
+              birthday: normalizedBirthday.value,
+            },
           },
         });
         if (error) throw error;
@@ -125,7 +159,13 @@ export default function Home() {
           <div className={styles.cardTop}><span>{eyebrow}</span><small>SYN // 01</small></div>
           <h2>{title}</h2><p className={styles.subtitle}>{description}</p>
           <form onSubmit={submit}>
-            <label htmlFor="email">E-MAIL</label>
+            {mode === "signup" && <>
+              <label htmlFor="displayName">COMO DEVEMOS TE CHAMAR?</label>
+              <div className={styles.input}><UserIcon/><input id="displayName" type="text" placeholder="Seu nome" minLength={2} maxLength={40} value={displayName} onChange={e => setDisplayName(e.target.value)} required/></div>
+              <label htmlFor="birthday" className={styles.stackedLabel}>DATA DE ANIVERSÁRIO</label>
+              <div className={styles.input}><CalendarIcon/><input id="birthday" type="date" max={new Date().toISOString().slice(0, 10)} value={birthday} onChange={e => setBirthday(e.target.value)}/></div>
+            </>}
+            <label htmlFor="email" className={mode === "signup" ? styles.stackedLabel : undefined}>E-MAIL</label>
             <div className={styles.input}><MailIcon/><input id="email" type="email" placeholder="voce@exemplo.com" value={email} onChange={e => setEmail(e.target.value)} required/></div>
             {mode !== "recovery" && <>
               <div className={styles.labelRow}><label htmlFor="password">SENHA</label>{mode === "login" && <button type="button" onClick={() => changeMode("recovery")}>Esqueceu a senha?</button>}</div>
