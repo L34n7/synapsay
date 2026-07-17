@@ -33,19 +33,36 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const authenticated = Boolean(data?.claims?.sub);
   const path = request.nextUrl.pathname;
+  const privatePath =
+    path.startsWith("/dashboard") ||
+    path.startsWith("/memorias") ||
+    path.startsWith("/historico") ||
+    path.startsWith("/agenda") ||
+    path.startsWith("/personalidade") ||
+    path === "/redefinir-senha";
 
-  if (
-    (path.startsWith("/dashboard") ||
-      path.startsWith("/memorias") ||
-      path.startsWith("/historico") ||
-      path.startsWith("/agenda") ||
-      path === "/redefinir-senha") &&
-    !authenticated
-  ) {
+  if (privatePath && !authenticated) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.searchParams.set("erro", "sessao_expirada");
     return copyCookies(response, NextResponse.redirect(url));
+  }
+
+  if (authenticated && data?.claims?.sub) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("onboarding_completed")
+      .eq("id", data.claims.sub)
+      .maybeSingle();
+    const needsOnboarding = profile?.onboarding_completed === false;
+
+    if (needsOnboarding && path !== "/personalidade") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/personalidade";
+      url.search = "";
+      url.searchParams.set("onboarding", "1");
+      return copyCookies(response, NextResponse.redirect(url));
+    }
   }
 
   if (path === "/" && authenticated) {
