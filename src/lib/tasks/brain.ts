@@ -432,7 +432,10 @@ export function formatTaskBrainToolResult(result: TaskBrainResult) {
       result.intent === "query" ? result.relatedTasks.map(taskForAssistant) : [],
     responseRules: [
       "Todos os horários já estão convertidos para o fuso indicado em timeZone.",
-      "Repita scheduledLocal, dueLocal e remindAtLocal exatamente como recebidos; não recalcule nem converta o horário.",
+      "Para resposta ao usuário, prefira scheduledSpeech, dueSpeech e remindAtSpeech. Eles já estão no formato natural correto.",
+      "Use scheduledLocal, dueLocal e remindAtLocal apenas como referência técnica; nunca recalcule nem converta horário.",
+      "Ao falar horário, use 'às'. Exemplo: 'amanhã, às 14:00'.",
+      "Não diga o ano quando for o ano atual; se precisar dizer data, inclua também o dia da semana.",
       "Confirme um lembrete somente quando ele aparecer em task.reminders.",
       "Não mencione o status pending, a menos que o usuário pergunte pelo status.",
     ],

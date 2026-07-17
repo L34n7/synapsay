@@ -12,6 +12,84 @@ function validTimeZone(timeZone: string) {
   }
 }
 
+function localDateKey(value: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+function addDaysKey(timeZone: string, offsetDays: number) {
+  const base = new Date();
+  base.setUTCDate(base.getUTCDate() + offsetDays);
+  return localDateKey(base, timeZone);
+}
+
+function dateParts(value: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    day: get("day"),
+    month: get("month"),
+    year: get("year"),
+  };
+}
+
+function weekday(value: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone,
+    weekday: "long",
+  }).format(value);
+}
+
+function timeLabel(value: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(value);
+}
+
+export function formatTaskSpeechDateTime(
+  value: string | null,
+  timeZone = DEFAULT_TIME_ZONE,
+  dateOnly = false,
+) {
+  if (!value) return null;
+  const safeTimeZone = validTimeZone(timeZone);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const key = localDateKey(date, safeTimeZone);
+  const todayKey = addDaysKey(safeTimeZone, 0);
+  const tomorrowKey = addDaysKey(safeTimeZone, 1);
+  const dayAfterTomorrowKey = addDaysKey(safeTimeZone, 2);
+  const { day, month, year } = dateParts(date, safeTimeZone);
+  const currentYear = dateParts(new Date(), safeTimeZone).year;
+  const dayName = weekday(date, safeTimeZone);
+  const dateLabel =
+    key === todayKey
+      ? "hoje"
+      : key === tomorrowKey
+        ? "amanhã"
+        : key === dayAfterTomorrowKey
+          ? `depois de amanhã, ${day}/${month}, ${dayName}`
+          : year === currentYear
+            ? `${day}/${month}, ${dayName}`
+            : `${day}/${month}/${year}, ${dayName}`;
+
+  if (dateOnly) return dateLabel;
+  return `${dateLabel}, às ${timeLabel(date, safeTimeZone)}`;
+}
+
 export function formatTaskDateTime(
   value: string | null,
   timeZone = DEFAULT_TIME_ZONE,
@@ -36,7 +114,9 @@ export function taskForAssistant(task: TaskRecord) {
     title: task.title,
     status: task.status,
     scheduledLocal: formatTaskDateTime(task.scheduled_at, timeZone, task.all_day),
+    scheduledSpeech: formatTaskSpeechDateTime(task.scheduled_at, timeZone, task.all_day),
     dueLocal: formatTaskDateTime(task.due_at, timeZone, task.all_day),
+    dueSpeech: formatTaskSpeechDateTime(task.due_at, timeZone, task.all_day),
     allDay: task.all_day,
     timeZone,
     reminders: (task.reminders ?? [])
@@ -44,6 +124,7 @@ export function taskForAssistant(task: TaskRecord) {
       .map((reminder) => ({
         status: reminder.status,
         remindAtLocal: formatTaskDateTime(reminder.remind_at, timeZone),
+        remindAtSpeech: formatTaskSpeechDateTime(reminder.remind_at, timeZone),
       })),
     details: task.description || null,
   };
