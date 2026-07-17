@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ASSISTANT_VOICE_OPTIONS,
   ASSISTANT_TONES,
@@ -18,6 +18,8 @@ import { createClient } from "@/lib/supabase/client";
 import styles from "./personalidade.module.css";
 
 const PERSONALITY_ENDPOINT = "/api/profile/personality";
+const VOICE_PREVIEW_ENDPOINT = "/api/profile/personality/voice/preview";
+const VOICE_PREVIEW_COOLDOWN_MS = 3_000;
 
 const voices: Record<AssistantVoice, string> = {
   marin: "Marin — clara e natural",
@@ -111,6 +113,13 @@ export default function PersonalityPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(false);
   const [onboardingMode, setOnboardingMode] = useState(false);
+  const [voicePreviewCacheKey, setVoicePreviewCacheKey] = useState("");
+  const [previewingVoice, setPreviewingVoice] = useState<AssistantVoice | null>(null);
+  const [voicePreviewCoolingDown, setVoicePreviewCoolingDown] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudiosRef = useRef(new Map<string, HTMLAudioElement>());
+  const voicePreviewCooldownRef = useRef(false);
+  const cooldownTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,6 +136,11 @@ export default function PersonalityPage() {
         }
         const personality = data.personality as AssistantPersonality;
         setForm(personality);
+        setVoicePreviewCacheKey(
+          typeof data.voicePreviewCacheKey === "string"
+            ? data.voicePreviewCacheKey
+            : "",
+        );
         setTopicsText(personality.prohibitedTopics.join("\n"));
         setOnboardingMode(
           hasOnboardingParam() ||
@@ -144,6 +158,19 @@ export default function PersonalityPage() {
 
     void load();
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const previewAudios = previewAudiosRef.current;
+
+    return () => {
+      audioRef.current?.pause();
+      if (cooldownTimerRef.current !== null) {
+        window.clearTimeout(cooldownTimerRef.current);
+      }
+      previewAudios.forEach((audio) => audio.pause());
+      previewAudios.clear();
+    };
   }, []);
 
   const preview = useMemo(() => {
@@ -166,6 +193,64 @@ export default function PersonalityPage() {
     setError(false);
   }
 
+  function startVoicePreviewCooldown() {
+    voicePreviewCooldownRef.current = true;
+    setVoicePreviewCoolingDown(true);
+    if (cooldownTimerRef.current !== null) {
+      window.clearTimeout(cooldownTimerRef.current);
+    }
+    cooldownTimerRef.current = window.setTimeout(() => {
+      voicePreviewCooldownRef.current = false;
+      setVoicePreviewCoolingDown(false);
+      cooldownTimerRef.current = null;
+    }, VOICE_PREVIEW_COOLDOWN_MS);
+  }
+
+  async function previewVoice(voice: AssistantVoice) {
+    setField("preferredVoice", voice);
+
+    if (previewingVoice || voicePreviewCooldownRef.current) {
+      return;
+    }
+
+    audioRef.current?.pause();
+    setPreviewingVoice(voice);
+    setNotice("");
+    setError(false);
+    startVoicePreviewCooldown();
+
+    try {
+      const previewCacheKey = `${voice}:${form.tone}:${form.communicationStyle}`;
+      let audio = previewAudiosRef.current.get(previewCacheKey);
+
+      if (!audio) {
+        const previewUrl = `${clientApiUrl(VOICE_PREVIEW_ENDPOINT)}?voice=${encodeURIComponent(voice)}&tone=${encodeURIComponent(form.tone)}&communicationStyle=${encodeURIComponent(form.communicationStyle)}&cacheKey=${encodeURIComponent(voicePreviewCacheKey)}`;
+        audio = new Audio(previewUrl);
+        audio.preload = "auto";
+        previewAudiosRef.current.set(previewCacheKey, audio);
+      }
+
+      audioRef.current = audio;
+      audio.currentTime = 0;
+      await audio.play();
+      await new Promise<void>((resolve) => {
+        audio.addEventListener("ended", () => resolve(), { once: true });
+        audio.addEventListener("error", () => resolve(), { once: true });
+      });
+    } catch (reason) {
+      console.error("Falha ao reproduzir prévia de voz:", reason);
+      setError(true);
+      setNotice(
+        visibleErrorMessage(
+          reason,
+          "Não foi possível reproduzir esta voz agora. Tente novamente.",
+        ),
+      );
+    } finally {
+      setPreviewingVoice(null);
+    }
+  }
+
   async function save() {
     setSaving(true);
     setNotice("");
@@ -183,6 +268,11 @@ export default function PersonalityPage() {
       }
       const personality = data.personality as AssistantPersonality;
       setForm(personality);
+      setVoicePreviewCacheKey(
+        typeof data.voicePreviewCacheKey === "string"
+          ? data.voicePreviewCacheKey
+          : voicePreviewCacheKey,
+      );
       setTopicsText(personality.prohibitedTopics.join("\n"));
       if (onboardingMode) {
         setNotice("Personalidade sincronizada. Vou abrir sua assistente agora.");
@@ -260,15 +350,23 @@ export default function PersonalityPage() {
                     type="button"
                     key={voice}
                     className={form.preferredVoice === voice ? styles.voiceSelected : ""}
-                    onClick={() => setField("preferredVoice", voice)}
+                    onClick={() => void previewVoice(voice)}
                     disabled={loading}
+                    aria-label={`Selecionar e ouvir uma prévia da voz ${ASSISTANT_VOICE_OPTIONS[voice].label}`}
                   >
                     <strong>{ASSISTANT_VOICE_OPTIONS[voice].label}</strong>
                     <span>{ASSISTANT_VOICE_OPTIONS[voice].description}</span>
-                    <small>{ASSISTANT_VOICE_OPTIONS[voice].sample}</small>
+                    <small>
+                      {previewingVoice === voice
+                        ? "REPRODUZINDO PRÉVIA..."
+                        : form.preferredVoice === voice && voicePreviewCoolingDown
+                          ? "AGUARDE PARA OUVIR NOVAMENTE"
+                          : "CLIQUE PARA OUVIR"}
+                    </small>
                   </button>
                 ))}
               </div>
+              <p className={styles.voicePreviewNote}>Prévia curta gerada por IA com o seu primeiro nome. Há um intervalo de 3 segundos entre reproduções e o áudio fica em cache neste navegador por até 30 dias.</p>
             </section>
 
             <section className={styles.panel}>

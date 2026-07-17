@@ -8,11 +8,12 @@ import {
   normalizeProhibitedTopics,
 } from "@/lib/personality";
 import { createClient } from "@/lib/supabase/server";
+import { voicePreviewCacheKey } from "@/lib/voice-preview-cache";
 
 export const runtime = "nodejs";
 
 const PROFILE_COLUMNS =
-  "assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed" as const;
+  "display_name, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed" as const;
 
 async function authenticatedProfile() {
   const supabase = await createClient();
@@ -37,7 +38,10 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ personality: normalizePersonalityRow(data) });
+  return NextResponse.json({
+    personality: normalizePersonalityRow(data),
+    voicePreviewCacheKey: voicePreviewCacheKey(userId, data?.display_name),
+  });
 }
 
 export async function PATCH(request: Request) {
@@ -85,5 +89,8 @@ export async function PATCH(request: Request) {
     );
   }
 
-  return NextResponse.json({ personality: normalizePersonalityRow(data) });
+  return NextResponse.json({
+    personality: normalizePersonalityRow(data),
+    voicePreviewCacheKey: voicePreviewCacheKey(userId, data?.display_name),
+  });
 }
