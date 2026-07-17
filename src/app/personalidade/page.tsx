@@ -16,6 +16,8 @@ import {
 } from "@/lib/personality";
 import styles from "./personalidade.module.css";
 
+const PERSONALITY_ENDPOINT = "/api/profile/personality";
+
 const voices: Record<AssistantVoice, string> = {
   marin: "Marin — clara e natural",
   cedar: "Cedar — calma e encorpada",
@@ -48,6 +50,58 @@ const tones: Record<AssistantTone, string> = {
   casual: "Descontraído",
 };
 
+function clientApiUrl(path: string) {
+  if (typeof window === "undefined") return path;
+  return `${window.location.origin}${path}`;
+}
+
+function hasOnboardingParam() {
+  if (typeof window === "undefined") return false;
+
+  const query = window.location.search.startsWith("?")
+    ? window.location.search.slice(1)
+    : window.location.search;
+
+  return query.split("&").some((entry) => {
+    const [rawKey, rawValue = ""] = entry.split("=");
+
+    try {
+      return (
+        decodeURIComponent(rawKey.replace(/\+/g, " ")) === "onboarding" &&
+        decodeURIComponent(rawValue.replace(/\+/g, " ")) === "1"
+      );
+    } catch {
+      return rawKey === "onboarding" && rawValue === "1";
+    }
+  });
+}
+
+async function readJson(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error("Resposta inesperada do servidor ao carregar a personalidade.");
+  }
+}
+
+function apiError(data: Record<string, unknown> | null, fallback: string) {
+  return typeof data?.error === "string" ? data.error : fallback;
+}
+
+function visibleErrorMessage(reason: unknown, fallback: string) {
+  if (!(reason instanceof Error)) return fallback;
+  if (!reason.message) return fallback;
+
+  if (reason.message === "The string did not match the expected pattern.") {
+    return fallback;
+  }
+
+  return reason.message;
+}
+
 export default function PersonalityPage() {
   const [form, setForm] = useState<AssistantPersonality>(DEFAULT_PERSONALITY);
   const [topicsText, setTopicsText] = useState("");
@@ -62,22 +116,26 @@ export default function PersonalityPage() {
 
     async function load() {
       try {
-        const response = await fetch("/api/profile/personality", {
+        const response = await fetch(clientApiUrl(PERSONALITY_ENDPOINT), {
           cache: "no-store",
           signal: controller.signal,
         });
-        const data = await response.json();
-        if (!response.ok || !data.personality) throw new Error(data.error ?? "Não foi possível carregar suas preferências.");
-        setForm(data.personality);
-        setTopicsText(data.personality.prohibitedTopics.join("\n"));
+        const data = await readJson(response);
+        if (!response.ok || !data?.personality) {
+          throw new Error(apiError(data, "Não foi possível carregar suas preferências."));
+        }
+        const personality = data.personality as AssistantPersonality;
+        setForm(personality);
+        setTopicsText(personality.prohibitedTopics.join("\n"));
         setOnboardingMode(
-          new URLSearchParams(window.location.search).get("onboarding") === "1" ||
-            !data.personality.onboardingCompleted,
+          hasOnboardingParam() ||
+            !personality.onboardingCompleted,
         );
       } catch (reason) {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
+        console.error("Falha ao carregar personalidade:", reason);
         setError(true);
-        setNotice(reason instanceof Error ? reason.message : "Falha ao carregar preferências.");
+        setNotice(visibleErrorMessage(reason, "Não foi possível carregar suas preferências agora. Atualize a página e tente novamente."));
       } finally {
         setLoading(false);
       }
@@ -113,15 +171,18 @@ export default function PersonalityPage() {
     setError(false);
     try {
       const prohibitedTopics = topicsText.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean);
-      const response = await fetch("/api/profile/personality", {
+      const response = await fetch(clientApiUrl(PERSONALITY_ENDPOINT), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, prohibitedTopics }),
       });
-      const data = await response.json();
-      if (!response.ok || !data.personality) throw new Error(data.error ?? "Não foi possível salvar.");
-      setForm(data.personality);
-      setTopicsText(data.personality.prohibitedTopics.join("\n"));
+      const data = await readJson(response);
+      if (!response.ok || !data?.personality) {
+        throw new Error(apiError(data, "Não foi possível salvar."));
+      }
+      const personality = data.personality as AssistantPersonality;
+      setForm(personality);
+      setTopicsText(personality.prohibitedTopics.join("\n"));
       if (onboardingMode) {
         setNotice("Personalidade sincronizada. Vou abrir sua assistente agora.");
         window.setTimeout(() => {
@@ -131,8 +192,9 @@ export default function PersonalityPage() {
         setNotice("Personalidade sincronizada. Ela será usada nas próximas respostas.");
       }
     } catch (reason) {
+      console.error("Falha ao salvar personalidade:", reason);
       setError(true);
-      setNotice(reason instanceof Error ? reason.message : "Falha ao salvar personalidade.");
+      setNotice(visibleErrorMessage(reason, "Não foi possível salvar a personalidade agora. Atualize a página e tente novamente."));
     } finally {
       setSaving(false);
     }

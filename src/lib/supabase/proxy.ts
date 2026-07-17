@@ -42,8 +42,7 @@ export async function updateSession(request: NextRequest) {
     path === "/redefinir-senha";
 
   if (privatePath && !authenticated) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
+    const url = new URL("/", request.url);
     url.searchParams.set("erro", "sessao_expirada");
     return copyCookies(response, NextResponse.redirect(url));
   }
@@ -57,19 +56,15 @@ export async function updateSession(request: NextRequest) {
     const needsOnboarding = profile?.onboarding_completed === false;
 
     if (needsOnboarding && path !== "/personalidade") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/personalidade";
-      url.search = "";
-      url.searchParams.set("onboarding", "1");
-      return copyCookies(response, NextResponse.redirect(url));
+      return copyCookies(
+        response,
+        NextResponse.redirect(new URL("/personalidade?onboarding=1", request.url)),
+      );
     }
   }
 
   if (path === "/" && authenticated) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    url.search = "";
-    return copyCookies(response, NextResponse.redirect(url));
+    return copyCookies(response, NextResponse.redirect(new URL("/dashboard", request.url)));
   }
 
   return response;
