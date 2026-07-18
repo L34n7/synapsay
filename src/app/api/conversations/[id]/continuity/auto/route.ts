@@ -45,7 +45,22 @@ export async function POST(_request: Request, context: RouteContext) {
   } catch (reason) {
     const message =
       reason instanceof Error ? reason.message : "Falha ao atualizar continuidade.";
-    console.error("Falha ao atualizar continuidade:", reason);
-    return NextResponse.json({ error: message }, { status: 502 });
+
+    // Continuidade é um enriquecimento assíncrono. Uma resposta vazia do modelo
+    // não pode quebrar o chat nem interferir no salvamento de tarefas e rotinas.
+    await supabase
+      .from("assistant_continuity")
+      .update({
+        status: "ready",
+        last_error: message.slice(0, 500),
+      })
+      .eq("user_id", userId);
+
+    console.warn("Continuidade anterior preservada:", message);
+    return NextResponse.json({
+      refreshed: false,
+      preserved: true,
+      warning: message,
+    });
   }
 }
