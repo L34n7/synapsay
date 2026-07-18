@@ -1,0 +1,207 @@
+name: Apply realtime voice preview fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-voice-preview-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply focused patch
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          dashboard = Path('src/app/dashboard/page.tsx')
+          text = dashboard.read_text(encoding='utf-8')
+
+          old_ref = '  const voiceSelectionTimeoutRef = useRef<number | null>(null);\n'
+          new_ref = old_ref + '  const voicePreviewSourceRef = useRef<AudioBufferSourceNode | null>(null);\n'
+          if new_ref not in text:
+              if old_ref not in text:
+                  raise SystemExit('dashboard ref anchor not found')
+              text = text.replace(old_ref, new_ref, 1)
+
+          apply_voice_block = '''  const applyRealtimeVoice = useCallback((voice: string) => {
+    const channel = dataChannelRef.current;
+    if (!channel || channel.readyState !== "open") return;
+
+    channel.send(
+      JSON.stringify({
+        type: "session.update",
+        session: {
+          audio: {
+            output: { voice },
+          },
+        },
+      }),
+    );
+  }, []);
+'''
+          preview_block = apply_voice_block + '''
+  const playVoicePreview = useCallback(async (voice: string) => {
+    const context = contextRef.current;
+    if (!context) {
+      throw new Error("A conexão de áudio ainda não está pronta.");
+    }
+
+    voicePreviewSourceRef.current?.stop();
+    voicePreviewSourceRef.current = null;
+
+    const response = await fetch(
+      `/api/profile/personality/voice/preview?voice=${encodeURIComponent(voice)}`,
+      { cache: "force-cache" },
+    );
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(data?.error ?? "Não foi possível reproduzir esta voz agora.");
+    }
+
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+
+    const buffer = await context.decodeAudioData(await response.arrayBuffer());
+    const source = context.createBufferSource();
+    const realtimeAudio = audioRef.current;
+    const wasMuted = realtimeAudio?.muted ?? false;
+
+    source.buffer = buffer;
+    source.connect(context.destination);
+    voicePreviewSourceRef.current = source;
+    if (realtimeAudio) realtimeAudio.muted = true;
+    setTranscript(`Reproduzindo a prévia da voz ${voice}.`);
+    setVoiceState("speaking");
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        source.addEventListener("ended", () => resolve(), { once: true });
+        try {
+          source.start(0);
+        } catch (reason) {
+          reject(reason);
+        }
+      });
+    } finally {
+      if (voicePreviewSourceRef.current === source) {
+        voicePreviewSourceRef.current = null;
+      }
+      source.disconnect();
+      if (realtimeAudio) realtimeAudio.muted = wasMuted;
+      setVoiceState(mutedRef.current ? "muted" : "listening");
+    }
+  }, []);
+'''
+          if preview_block not in text:
+              if apply_voice_block not in text:
+                  raise SystemExit('applyRealtimeVoice anchor not found')
+              text = text.replace(apply_voice_block, preview_block, 1)
+
+          old_preview = '''      if (result.previewVoice) {
+        applyRealtimeVoice(result.previewVoice);
+        scheduleVoiceSelectionTimeout();
+'''
+          new_preview = '''      if (result.previewVoice) {
+        try {
+          await playVoicePreview(result.previewVoice);
+          output = {
+            ...(output as Record<string, unknown>),
+            previewPlayed: true,
+            message:
+              "A prévia foi reproduzida de verdade. Pergunte apenas se o usuário quer salvar esta voz, ouvir outra ou cancelar.",
+          };
+        } catch (reason) {
+          output = {
+            ...(output as Record<string, unknown>),
+            status: "preview_error",
+            previewPlayed: false,
+            error:
+              reason instanceof Error
+                ? reason.message
+                : "Não foi possível reproduzir esta voz agora.",
+            message:
+              "A prévia não foi reproduzida. Informe a falha sem afirmar que o usuário ouviu a voz e ofereça tentar novamente.",
+          };
+        }
+        scheduleVoiceSelectionTimeout();
+'''
+          if new_preview not in text:
+              if old_preview not in text:
+                  raise SystemExit('preview branch anchor not found')
+              text = text.replace(old_preview, new_preview, 1)
+
+          old_deps = '    [applyRealtimeVoice, scheduleVoiceSelectionTimeout],\n'
+          new_deps = '    [applyRealtimeVoice, playVoicePreview, scheduleVoiceSelectionTimeout],\n'
+          if new_deps not in text:
+              if old_deps not in text:
+                  raise SystemExit('personality callback dependency anchor not found')
+              text = text.replace(old_deps, new_deps, 1)
+
+          dashboard.write_text(text, encoding='utf-8')
+
+          preview_route = Path('src/app/api/profile/personality/voice/preview/route.ts')
+          route = preview_route.read_text(encoding='utf-8')
+          old_check = '''  if (requestedCacheKey !== voicePreviewCacheKey(userId, profile?.display_name)) {
+    return NextResponse.json(
+      { error: "A chave da prévia de voz expirou. Atualize a página." },
+      { status: 400 },
+    );
+  }
+'''
+          new_check = '''  if (
+    requestedCacheKey &&
+    requestedCacheKey !== voicePreviewCacheKey(userId, profile?.display_name)
+  ) {
+    return NextResponse.json(
+      { error: "A chave da prévia de voz expirou. Atualize a página." },
+      { status: 400 },
+    );
+  }
+'''
+          if new_check not in route:
+              if old_check not in route:
+                  raise SystemExit('preview cache check anchor not found')
+              route = route.replace(old_check, new_check, 1)
+          preview_route.write_text(route, encoding='utf-8')
+
+          token_route = Path('src/app/api/realtime/token/route.ts')
+          token = token_route.read_text(encoding='utf-8')
+          old_instruction = '      "Se o usuário pedir para ouvir uma opção, chame action=\'preview\' com o id da voz. A resposta seguinte será falada nessa voz; use a frase sample devolvida e pergunte se ele quer salvar, ouvir outra ou cancelar.",\n'
+          new_instruction = '      "Se o usuário pedir para ouvir uma opção, chame action=\'preview\' com o id da voz. O aplicativo reproduzirá uma amostra real separada e devolverá previewPlayed. Só diga que a prévia foi ouvida quando previewPlayed=true; depois pergunte se ele quer salvar, ouvir outra ou cancelar.",\n'
+          if new_instruction not in token:
+              if old_instruction not in token:
+                  raise SystemExit('realtime instruction anchor not found')
+              token = token.replace(old_instruction, new_instruction, 1)
+          token_route.write_text(token, encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Commit fix and remove temporary workflow
+        run: |
+          rm .github/workflows/fix-voice-preview-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/dashboard/page.tsx src/app/api/profile/personality/voice/preview/route.ts src/app/api/realtime/token/route.ts .github/workflows/fix-voice-preview-once.yml
+          git commit -m "Fix voice previews during realtime conversations"
+          git push origin main
