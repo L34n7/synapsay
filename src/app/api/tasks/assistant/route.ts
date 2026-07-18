@@ -5,12 +5,20 @@ import {
   formatTaskBrainToolResult,
 } from "@/lib/tasks/brain";
 import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
+import { analyzeAndApplyRoutineMessage } from "@/lib/routines/brain";
+import { executeRoutine, resolvePendingRoutine } from "@/lib/routines/executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function executionMarker(message: string) {
+  const routineId = message.match(/routineId=([0-9a-f-]{36})/i)?.[1] ?? null;
+  const referenceKey = message.match(/referenceKey=([^\s;]+)/i)?.[1] ?? null;
+  return routineId && referenceKey ? { routineId, referenceKey } : null;
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -33,7 +41,7 @@ export async function POST(request: Request) {
     !message ||
     message.length > 20_000
   ) {
-    return NextResponse.json({ error: "Pedido de agenda inválido." }, { status: 400 });
+    return NextResponse.json({ error: "Pedido do assistente inválido." }, { status: 400 });
   }
   const { data: conversation } = await supabase
     .from("conversations")
@@ -45,6 +53,48 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Conversa não encontrada." }, { status: 404 });
   }
   try {
+    const marker = executionMarker(message);
+    if (marker) {
+      const execution = await executeRoutine({
+        supabase,
+        userId,
+        routineId: marker.routineId,
+        referenceKey: marker.referenceKey,
+      });
+      return NextResponse.json({
+        success: true,
+        kind: "routine_execution",
+        ...execution,
+        instruction: execution.feedbackPrompt ?? "Leia o conteúdo ao usuário e depois retome a conversa normal.",
+      });
+    }
+
+    const pending = await resolvePendingRoutine({ supabase, userId, message });
+    if (pending?.handled) {
+      return NextResponse.json({ success: true, kind: "routine_confirmation", ...pending });
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("timezone")
+      .eq("id", userId)
+      .maybeSingle();
+    const routine = await analyzeAndApplyRoutineMessage({
+      supabase,
+      userId,
+      message,
+      source: "voice",
+      timezone: profile?.timezone || "America/Sao_Paulo",
+    });
+    if (routine.handled) {
+      return NextResponse.json({
+        success: true,
+        kind: "routine_management",
+        ...routine,
+        instruction: "Confirme ao usuário exatamente o resumo da operação estruturada.",
+      });
+    }
+
     const result = await analyzeAndApplyTaskMessage({
       supabase,
       userId,
@@ -70,9 +120,9 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(formatTaskBrainToolResult(result));
   } catch (reason) {
-    console.error("Falha no cérebro de tarefas:", reason);
+    console.error("Falha no cérebro unificado de tarefas e rotinas:", reason);
     return NextResponse.json(
-      { error: reason instanceof Error ? reason.message : "Falha ao analisar a agenda." },
+      { error: reason instanceof Error ? reason.message : "Falha ao analisar o pedido." },
       { status: 500 },
     );
   }
