@@ -53,7 +53,11 @@ export async function proxy(request: NextRequest) {
           {
             method: "POST",
             headers: commonHeaders,
-            body: JSON.stringify({ message, source: "text" }),
+            body: JSON.stringify({
+              message,
+              source: "text",
+              conversationId,
+            }),
             cache: "no-store",
           },
         );

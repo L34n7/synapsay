@@ -8,7 +8,7 @@ export const maxDuration = 120;
 type RouteContext = { params: Promise<{ id: string }> };
 
 const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(_request: Request, context: RouteContext) {
   const { id } = await context.params;
