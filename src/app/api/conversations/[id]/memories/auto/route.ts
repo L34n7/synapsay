@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractMemories } from "@/lib/memory/extract";
+import { recordInterestSignal } from "@/lib/routines/brain";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -9,23 +10,14 @@ type RouteContext = { params: Promise<{ id: string }> };
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/**
- * Cérebro de memória automático.
- * É chamado após cada fala do usuário. A resposta da voz não espera por esta
- * análise: se ela falhar, a conversa continua normalmente.
- */
 export async function POST(_request: Request, context: RouteContext) {
   const { id } = await context.params;
-  if (!UUID_PATTERN.test(id)) {
-    return NextResponse.json({ error: "Conversa inválida." }, { status: 400 });
-  }
+  if (!UUID_PATTERN.test(id)) return NextResponse.json({ error: "Conversa inválida." }, { status: 400 });
 
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getClaims();
   const userId = authData?.claims?.sub;
-  if (!userId) {
-    return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
-  }
+  if (!userId) return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
 
   const { data: conversation, error: conversationError } = await supabase
     .from("conversations")
@@ -33,15 +25,8 @@ export async function POST(_request: Request, context: RouteContext) {
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
-
-  if (conversationError || !conversation) {
-    return NextResponse.json({ error: "Conversa não encontrada." }, { status: 404 });
-  }
-
-  // Uma solicitação concorrente já está cuidando desta conversa.
-  if (conversation.memory_processing_status === "processing") {
-    return NextResponse.json({ queued: true, insertedCount: 0 });
-  }
+  if (conversationError || !conversation) return NextResponse.json({ error: "Conversa não encontrada." }, { status: 404 });
+  if (conversation.memory_processing_status === "processing") return NextResponse.json({ queued: true, insertedCount: 0 });
 
   const { data: messages, error: messagesError } = await supabase
     .from("messages")
@@ -50,30 +35,28 @@ export async function POST(_request: Request, context: RouteContext) {
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .limit(300);
+  if (messagesError) return NextResponse.json({ error: "Não foi possível carregar a conversa." }, { status: 500 });
+  if (!messages?.some((message) => message.role === "user")) return NextResponse.json({ insertedCount: 0 });
 
-  if (messagesError) {
-    return NextResponse.json(
-      { error: "Não foi possível carregar a conversa." },
-      { status: 500 },
-    );
-  }
-
-  if (!messages?.some((message) => message.role === "user")) {
-    return NextResponse.json({ insertedCount: 0 });
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user" && message.content.trim());
+  if (latestUserMessage) {
+    void recordInterestSignal({
+      supabase,
+      userId,
+      message: latestUserMessage.content,
+      source: "voice",
+      timezone: "America/Sao_Paulo",
+    }).catch((reason) => console.warn("Sinal de rotina não registrado:", reason));
   }
 
   await supabase
     .from("conversations")
-    .update({
-      memory_processing_status: "processing",
-      memory_processing_error: null,
-    })
+    .update({ memory_processing_status: "processing", memory_processing_error: null })
     .eq("id", id)
     .eq("user_id", userId);
 
   try {
     const result = await extractMemories({ supabase, userId, messages });
-
     const candidates = result.memories.map((memory) => ({
       user_id: userId,
       conversation_id: id,
@@ -83,7 +66,6 @@ export async function POST(_request: Request, context: RouteContext) {
       source: "conversation",
       importance: memory.importance,
       status: "active",
-      // A solicitação do usuário é por memória automática: não fica pendente.
       review_status: "approved",
       memory_type: memory.memoryType,
       expires_at: memory.expiresAt,
@@ -100,45 +82,26 @@ export async function POST(_request: Request, context: RouteContext) {
     if (candidates.length) {
       const { data: inserted, error: insertError } = await supabase
         .from("memories")
-        .upsert(candidates, {
-          onConflict: "user_id,dedupe_key",
-          ignoreDuplicates: true,
-        })
+        .upsert(candidates, { onConflict: "user_id,dedupe_key", ignoreDuplicates: true })
         .select("id");
-
-      if (insertError) {
-        throw new Error("Não foi possível salvar as memórias.");
-      }
+      if (insertError) throw new Error("Não foi possível salvar as memórias.");
       insertedCount = inserted?.length ?? 0;
     }
 
     await supabase
       .from("conversations")
-      .update({
-        memory_processed_at: new Date().toISOString(),
-        memory_processing_status: "completed",
-        memory_processing_error: null,
-      })
+      .update({ memory_processed_at: new Date().toISOString(), memory_processing_status: "completed", memory_processing_error: null })
       .eq("id", id)
       .eq("user_id", userId);
 
-    return NextResponse.json({
-      insertedCount,
-      duplicateCount: candidates.length - insertedCount,
-    });
+    return NextResponse.json({ insertedCount, duplicateCount: candidates.length - insertedCount });
   } catch (reason) {
-    const detail =
-      reason instanceof Error ? reason.message : "Falha ao analisar a conversa.";
-
+    const detail = reason instanceof Error ? reason.message : "Falha ao analisar a conversa.";
     await supabase
       .from("conversations")
-      .update({
-        memory_processing_status: "failed",
-        memory_processing_error: detail.slice(0, 500),
-      })
+      .update({ memory_processing_status: "failed", memory_processing_error: detail.slice(0, 500) })
       .eq("id", id)
       .eq("user_id", userId);
-
     console.error("Falha ao salvar memória automática:", reason);
     return NextResponse.json({ error: detail }, { status: 502 });
   }
