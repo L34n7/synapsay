@@ -79,8 +79,8 @@ export function formatRoutineOpening(opportunities:RoutineOpportunity[]) {
     const sources=(config.sources ?? []).map((source) => source.label || source.value).join(", ");
     const feedback=shouldAskFeedback ? " Ao terminar, pergunte brevemente se o formato está bom ou se deseja mudar duração, assuntos ou fontes." : "";
     const execution=`routineId=${routine.id}; referenceKey=${referenceKey}`;
-    if (requiresConfirmation) return `Existe uma rotina disponível chamada "${routine.name}" (${execution}). Pergunte de forma breve se o usuário quer executá-la agora. Se ele aceitar, chame manage_assistant_routines com action=confirm_and_execute e estes identificadores. Se recusar, use action=decline. Não execute antes da confirmação.${feedback}`;
-    return `Execute agora a rotina "${routine.name}" (${execution}) chamando manage_assistant_routines com action=execute. Tipo: ${routine.action_type}. ${topics ? `Assuntos: ${topics}.` : ""} ${sources ? `Fontes: ${sources}.` : ""} ${config.sourcesOnly ? "Use somente as fontes configuradas." : "Fontes configuradas são preferenciais."} ${config.prompt ?? ""}${feedback}`;
+    if (requiresConfirmation) return `Existe uma rotina disponível chamada "${routine.name}" (${execution}). Pergunte de forma breve se o usuário quer executá-la agora. Se ele responder, chame manage_tasks enviando a resposta completa; o cérebro unificado localizará a rotina pendente, confirmará, recusará ou desativará conforme a fala. Não execute antes da confirmação.${feedback}`;
+    return `Execute agora a rotina "${routine.name}" chamando manage_tasks com a mensagem exata "EXECUTAR_ROTINA ${execution}". Depois leia integralmente o conteúdo devolvido pela ferramenta. Tipo: ${routine.action_type}. ${topics ? `Assuntos: ${topics}.` : ""} ${sources ? `Fontes: ${sources}.` : ""} ${config.sourcesOnly ? "Use somente as fontes configuradas." : "Fontes configuradas são preferenciais."} ${config.prompt ?? ""}${feedback}`;
   }).join("\n");
 }
 
@@ -89,5 +89,5 @@ export async function findRoutineSuggestion(supabase:SupabaseLike,userId:string)
   if (!data) return null;
   await supabase.from("assistant_routine_signals").update({ suggested_at:new Date().toISOString() }).eq("id",data.id).eq("user_id",userId);
   const period=data.local_period === "morning" ? "pela manhã" : data.local_period === "afternoon" ? "à tarde" : "à noite";
-  return `Você costuma conversar sobre ${data.topic} ${period}. Pergunte, sem criar automaticamente, se o usuário gostaria de transformar esse padrão em uma rotina.`;
+  return `Você costuma conversar sobre ${data.topic} ${period}. Pergunte, sem criar automaticamente, se o usuário gostaria de transformar esse padrão em uma rotina. Se ele aceitar, chame manage_tasks enviando a fala completa.`;
 }
