@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ReminderNotifications from "./ReminderNotifications";
+import RoutineNavigationPortal from "./RoutineNavigationPortal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,6 +28,7 @@ export default function RootLayout({
     <html lang="pt-BR" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
         {children}
+        <RoutineNavigationPortal />
         <ReminderNotifications />
       </body>
     </html>
