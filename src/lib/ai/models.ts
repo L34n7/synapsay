@@ -6,23 +6,25 @@
  */
 function configuredModel(variable: string | undefined, fallback: string) {
   const value = variable?.trim();
+  if (!value) return fallback;
 
-  // Impede que nomes internos, experimentais ou digitados incorretamente
-  // derrubem os fluxos críticos do assistente em produção.
-  if (!value || value.startsWith("pt-") || value.toLowerCase().includes("luna")) {
-    return fallback;
-  }
+  // Corrige o erro de digitação que chegou à produção sem bloquear modelos
+  // oficiais. Ex.: "pt-5.6-luna" deve ser "gpt-5.6-luna".
+  if (value.startsWith("pt-")) return `g${value}`;
 
   return value;
 }
 
 export const AI_MODELS = {
   voice: configuredModel(process.env.OPENAI_REALTIME_MODEL, "gpt-realtime-mini"),
-  text: configuredModel(process.env.OPENAI_TEXT_MODEL, "gpt-5-mini"),
-  memoryBrain: configuredModel(process.env.OPENAI_MEMORY_MODEL, "gpt-5-mini"),
+  text: configuredModel(process.env.OPENAI_TEXT_MODEL, "gpt-5.6-luna"),
+  memoryBrain: configuredModel(
+    process.env.OPENAI_MEMORY_MODEL,
+    "gpt-5.6-luna",
+  ),
   memoryConflict: configuredModel(
     process.env.OPENAI_MEMORY_CONFLICT_MODEL,
-    "gpt-5-mini",
+    "gpt-5.6-luna",
   ),
   embedding: configuredModel(
     process.env.OPENAI_EMBEDDING_MODEL,
