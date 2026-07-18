@@ -2,11 +2,18 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { analyzeAndApplyRoutineMessage } from "@/lib/routines/brain";
 import { buildRoutineConversationContext } from "@/lib/routines/context";
-import { resolvePendingRoutine } from "@/lib/routines/executor";
+import { executeRoutine, resolvePendingRoutine } from "@/lib/routines/executor";
+import { tryCreateNewsRoutineFallback } from "@/lib/routines/fallback";
 import { resolvePendingRoutineSuggestion } from "@/lib/routines/suggestions";
 
 const STRONG_ROUTINE_INTENT =
-  /(?:rotina|agend(?:a|ar|e)|program(?:a|ar|e)|automatiz(?:a|ar|e)|todo dia|todos os dias|primeira conversa|a partir das|sempre que)/i;
+  /(?:rotina|agend(?:a|ar|e)|program(?:a|ar|e)|automatiz(?:a|ar|e)|todo dia|todos os dias|primeira conversa|próxima conversa|proxima conversa|a partir das|sempre que)/i;
+
+function executionMarker(message: string) {
+  const routineId = message.match(/routineId=([0-9a-f-]{36})/i)?.[1] ?? null;
+  const referenceKey = message.match(/referenceKey=([^\s;]+)/i)?.[1] ?? null;
+  return routineId && referenceKey ? { routineId, referenceKey } : null;
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -17,7 +24,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const message = typeof body?.message === "string" ? body.message.trim() : "";
   const source = body?.source === "voice" ? "voice" : "text";
-  const conversationId =
+  const sourceMessageId =
+    typeof body?.sourceMessageId === "string" ? body.sourceMessageId.trim() : null;
+  let conversationId =
     typeof body?.conversationId === "string" ? body.conversationId.trim() : null;
 
   if (!message) {
@@ -32,6 +41,22 @@ export async function POST(request: Request) {
   const timezone = profile?.timezone || "America/Sao_Paulo";
 
   try {
+    const marker = executionMarker(message);
+    if (marker) {
+      const execution = await executeRoutine({
+        supabase,
+        userId,
+        routineId: marker.routineId,
+        referenceKey: marker.referenceKey,
+      });
+      return NextResponse.json({
+        handled: true,
+        operation: "execute",
+        summary: execution.content,
+        ...execution,
+      });
+    }
+
     const pending = await resolvePendingRoutine({ supabase, userId, message });
     if (pending?.handled) return NextResponse.json(pending);
 
@@ -43,11 +68,27 @@ export async function POST(request: Request) {
     });
     if (suggestion?.handled) return NextResponse.json(suggestion);
 
+    // A ferramenta de voz nem sempre envia o ID da conversa. Nesse caso,
+    // recuperamos a conversa ativa mais recente para reconstruir pedidos
+    // divididos em várias falas, como horário -> assunto -> confirmação.
+    if (!conversationId && source === "voice") {
+      const { data: activeConversation } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      conversationId = activeConversation?.id ?? null;
+    }
+
     const analysisMessage = await buildRoutineConversationContext({
       supabase,
       userId,
       conversationId,
       currentMessage: message,
+      sourceMessageId,
     });
 
     const result = await analyzeAndApplyRoutineMessage({
@@ -57,27 +98,36 @@ export async function POST(request: Request) {
       source,
       timezone,
     });
+    if (result.handled) return NextResponse.json(result);
 
-    if (!result.handled && STRONG_ROUTINE_INTENT.test(analysisMessage)) {
+    // Pedidos simples e completos de notícias não podem depender apenas da
+    // classificação generativa. O fallback cria a rotina e evita duplicatas.
+    const fallback = await tryCreateNewsRoutineFallback({
+      supabase,
+      userId,
+      message: analysisMessage,
+      source,
+      timezone,
+    });
+    if (fallback) return NextResponse.json(fallback);
+
+    if (STRONG_ROUTINE_INTENT.test(analysisMessage)) {
       return NextResponse.json({
         handled: true,
         operation: "clarification",
         summary:
-          "Não consegui concluir o salvamento desta rotina nesta tentativa. Você não precisa informar ID, chave técnica, fuso ou nome interno. Diga apenas a ação, o horário e se quer confirmação antes de executar.",
+          "Ainda falta um dado funcional para salvar a rotina. Diga o que devo fazer e o horário inicial. Você não precisa informar ID, chave técnica, nome interno ou fuso.",
       });
     }
 
     return NextResponse.json(result);
   } catch (reason) {
     console.error("Falha no cérebro de rotinas:", reason);
-    return NextResponse.json(
-      {
-        handled: true,
-        operation: "error",
-        summary:
-          "Não consegui salvar a rotina por uma falha interna. Você não precisa fornecer nenhum ID técnico. Tente novamente mantendo ação e horário na mesma frase.",
-      },
-      { status: 200 },
-    );
+    return NextResponse.json({
+      handled: true,
+      operation: "error",
+      summary:
+        "Não consegui salvar a rotina por uma falha interna. Nenhum ID técnico é necessário. O pedido não foi salvo nesta tentativa.",
+    });
   }
 }
