@@ -100,7 +100,10 @@ export async function GET(request: Request) {
     .select("display_name")
     .eq("id", userId)
     .maybeSingle();
-  if (requestedCacheKey !== voicePreviewCacheKey(userId, profile?.display_name)) {
+  if (
+    requestedCacheKey &&
+    requestedCacheKey !== voicePreviewCacheKey(userId, profile?.display_name)
+  ) {
     return NextResponse.json(
       { error: "A chave da prévia de voz expirou. Atualize a página." },
       { status: 400 },
