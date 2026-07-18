@@ -1,0 +1,205 @@
+name: Apply routine voice fix
+
+on:
+  push:
+    branches: [agent/corrigir-rotinas-voz]
+    paths: [.github/workflows/apply-routine-voice-fix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/corrigir-rotinas-voz
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          token = Path('src/app/api/realtime/token/route.ts')
+          text = token.read_text()
+          old = '''    [
+      "A ferramenta manage_tasks é o cérebro unificado de agenda e rotinas.",
+      "Use-a para tarefas, compromissos, lembretes e também para criar, editar, pausar, excluir, confirmar, recusar ou executar rotinas.",
+      "Sempre envie em message a fala completa do usuário, preservando datas, horários, fontes e preferências.",
+      "Quando a abertura mandar executar uma rotina automática, chame manage_tasks com a mensagem técnica exata fornecida, contendo EXECUTAR_ROTINA, routineId e referenceKey.",
+      "Quando houver rotina aguardando confirmação, após a resposta do usuário chame manage_tasks com a resposta completa, mesmo que seja apenas 'sim', 'agora não' ou 'não quero mais'.",
+      "Nunca diga que uma rotina foi criada ou alterada antes de a ferramenta confirmar success=true.",
+      "Falar frequentemente sobre um assunto não cria rotina: apenas permite sugerir, e a criação exige autorização explícita.",
+    ].join(" "),'''
+          new = '''    [
+      "A ferramenta manage_tasks gerencia somente tarefas, compromissos e lembretes da agenda.",
+      "A ferramenta manage_routines gerencia exclusivamente rotinas recorrentes do assistente.",
+      "Sempre que o usuário pedir para criar, agendar, programar, automatizar, alterar, pausar, excluir, confirmar ou executar uma rotina, você DEVE chamar manage_routines antes de responder.",
+      "Envie em message o pedido completo, reunindo também os detalhes relevantes das falas imediatamente anteriores, como horário, recorrência, assunto, fontes e preferência de confirmação.",
+      "Quando a abertura mandar executar uma rotina automática, chame manage_routines com a mensagem técnica exata fornecida, contendo EXECUTAR_ROTINA, routineId e referenceKey.",
+      "Quando houver rotina aguardando confirmação, chame manage_routines mesmo que a resposta seja apenas 'sim', 'agora não' ou 'não quero mais'.",
+      "É proibido dizer que uma rotina foi criada, configurada, alterada ou excluída sem receber success=true da ferramenta. Em caso de erro, informe que não foi salva.",
+      "Nunca diga que não existe ferramenta para rotinas: manage_routines é a ferramenta específica disponível.",
+      "Falar frequentemente sobre um assunto não cria rotina: apenas permite sugerir, e a criação exige autorização explícita.",
+    ].join(" "),'''
+          if old not in text:
+              raise SystemExit('Bloco de instruções não encontrado')
+          text = text.replace(old, new)
+
+          marker = '''            {
+              type: "function",
+              name: "manage_tasks",
+              description:
+                "Cérebro unificado que gerencia agenda, lembretes e rotinas do assistente, incluindo briefings e confirmações.",
+              parameters: {
+                type: "object",
+                additionalProperties: false,
+                required: ["message"],
+                properties: {
+                  message: {
+                    type: "string",
+                    description:
+                      "Fala completa do usuário ou comando técnico de execução fornecido nas instruções de abertura.",
+                  },
+                },
+              },
+            },'''
+          replacement = '''            {
+              type: "function",
+              name: "manage_tasks",
+              description:
+                "Gerencia exclusivamente tarefas, compromissos e lembretes da agenda.",
+              parameters: {
+                type: "object",
+                additionalProperties: false,
+                required: ["message"],
+                properties: {
+                  message: {
+                    type: "string",
+                    description: "Pedido completo do usuário relacionado à agenda.",
+                  },
+                },
+              },
+            },
+            {
+              type: "function",
+              name: "manage_routines",
+              description:
+                "Cria, atualiza, pausa, reativa, exclui, confirma e executa rotinas recorrentes do assistente. Deve ser usada para qualquer pedido de rotina, automação recorrente ou briefing por janela de horário.",
+              parameters: {
+                type: "object",
+                additionalProperties: false,
+                required: ["message"],
+                properties: {
+                  message: {
+                    type: "string",
+                    description:
+                      "Pedido completo de rotina, reunindo horário, recorrência, assunto, fontes e confirmação mencionados na conversa.",
+                  },
+                },
+              },
+            },'''
+          if marker not in text:
+              raise SystemExit('Ferramenta manage_tasks não encontrada')
+          token.write_text(text.replace(marker, replacement))
+
+          dashboard = Path('src/app/dashboard/page.tsx')
+          text = dashboard.read_text()
+          anchor = '''  const applyRealtimeVoice = useCallback((voice: string) => {'''
+          handler = '''  const executeRoutineAssistant = useCallback(
+    async (call: RealtimeFunctionCall) => {
+      const channel = dataChannelRef.current;
+      if (
+        !channel ||
+        channel.readyState !== "open" ||
+        call.name !== "manage_routines" ||
+        !call.call_id
+      ) {
+        return false;
+      }
+
+      let message = latestUserTranscriptRef.current;
+      try {
+        const args = JSON.parse(call.arguments || "{}") as { message?: string };
+        message = args.message?.trim() || message;
+      } catch {
+        // Usa a transcrição atual quando os argumentos estiverem inválidos.
+      }
+
+      setTranscript("Certo, estou salvando sua rotina.");
+      let output: unknown;
+      try {
+        await Promise.allSettled([...pendingSavesRef.current]);
+        const response = await fetch("/api/routines/brain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, source: "voice" }),
+        });
+        output = await response.json();
+        if (!response.ok) {
+          output = {
+            success: false,
+            error:
+              (output as { error?: string })?.error ??
+              "Não foi possível salvar a rotina.",
+          };
+        } else {
+          const result = output as { handled?: boolean; summary?: string };
+          output = result.handled
+            ? { success: true, ...result, instruction: "Confirme somente o resumo retornado pela ferramenta." }
+            : { success: false, ...result, error: "O pedido não foi reconhecido como uma operação completa de rotina. Peça os dados que faltam e não diga que salvou." };
+        }
+      } catch {
+        output = {
+          success: false,
+          error: "Não foi possível salvar a rotina agora.",
+        };
+      }
+
+      channel.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: call.call_id,
+            output: JSON.stringify(output),
+          },
+        }),
+      );
+      return true;
+    },
+    [],
+  );
+
+'''
+          if anchor not in text:
+              raise SystemExit('Âncora do dashboard não encontrada')
+          text = text.replace(anchor, handler + anchor)
+          text = text.replace('''              "manage_tasks",
+              "configure_assistant_personality",''', '''              "manage_tasks",
+              "manage_routines",
+              "configure_assistant_personality",''')
+          text = text.replace('''              call.name === "manage_tasks"
+                ? executeTaskAssistant(call)
+                : call.name === "configure_assistant_personality"''', '''              call.name === "manage_tasks"
+                ? executeTaskAssistant(call)
+                : call.name === "manage_routines"
+                  ? executeRoutineAssistant(call)
+                  : call.name === "configure_assistant_personality"''')
+          text = text.replace('''    [executeHistorySearch, executePersonalityAssistant, executeTaskAssistant, saveMessage],''', '''    [executeHistorySearch, executePersonalityAssistant, executeRoutineAssistant, executeTaskAssistant, saveMessage],''')
+          dashboard.write_text(text)
+          PY
+      - run: npm install
+      - run: npm run build
+      - name: Commit validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/realtime/token/route.ts src/app/dashboard/page.tsx
+          git commit -m "fix: persistir rotinas criadas por voz" || exit 0
+          git push origin agent/corrigir-rotinas-voz
