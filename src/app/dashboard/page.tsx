@@ -435,6 +435,43 @@ export default function Dashboard() {
     [ensureConversation],
   );
 
+  const executeRoutineAssistant = useCallback(
+    async (call: RealtimeFunctionCall) => {
+      const channel = dataChannelRef.current;
+      if (!channel || channel.readyState !== "open" || call.name !== "manage_routines" || !call.call_id) return false;
+
+      let message = latestUserTranscriptRef.current;
+      try {
+        const args = JSON.parse(call.arguments || "{}") as { message?: string };
+        message = args.message?.trim() || message;
+      } catch {}
+
+      setTranscript("Certo, estou salvando sua rotina.");
+      let output: unknown;
+      try {
+        await Promise.allSettled([...pendingSavesRef.current]);
+        const response = await fetch("/api/routines/brain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, source: "voice" }),
+        });
+        const result = await response.json();
+        output = response.ok && result.handled
+          ? { success: true, ...result, instruction: "Confirme somente o resumo retornado." }
+          : { success: false, ...result, error: result.error ?? "A rotina não foi salva. Peça os dados ausentes sem afirmar que concluiu." };
+      } catch {
+        output = { success: false, error: "Não foi possível salvar a rotina agora." };
+      }
+
+      channel.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: { type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) },
+      }));
+      return true;
+    },
+    [],
+  );
+
   const applyRealtimeVoice = useCallback((voice: string) => {
     const channel = dataChannelRef.current;
     if (!channel || channel.readyState !== "open") return;
@@ -560,6 +597,7 @@ export default function Dashboard() {
             [
               "search_conversation_history",
               "manage_tasks",
+              "manage_routines",
               "configure_assistant_personality",
             ].includes(item.name ?? ""),
         );
@@ -570,7 +608,9 @@ export default function Dashboard() {
             calls.map((call) =>
               call.name === "manage_tasks"
                 ? executeTaskAssistant(call)
-                : call.name === "configure_assistant_personality"
+                : call.name === "manage_routines"
+                  ? executeRoutineAssistant(call)
+                  : call.name === "configure_assistant_personality"
                   ? executePersonalityAssistant(call)
                 : executeHistorySearch(call),
             ),
@@ -639,7 +679,7 @@ export default function Dashboard() {
         };
       }
     },
-    [executeHistorySearch, executePersonalityAssistant, executeTaskAssistant, saveMessage],
+    [executeHistorySearch, executePersonalityAssistant, executeRoutineAssistant, executeTaskAssistant, saveMessage],
   );
 
   const connect = useCallback(async () => {
