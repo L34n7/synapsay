@@ -15,6 +15,22 @@ function executionMarker(message: string) {
   return routineId && referenceKey ? { routineId, referenceKey } : null;
 }
 
+function extractUserRoutineText(analysisMessage: string) {
+  const lines = analysisMessage.split("\n");
+  const userLines = lines
+    .filter(
+      (line) => /^\d+\.\s/.test(line) || line.startsWith("PEDIDO ATUAL:"),
+    )
+    .map((line) =>
+      line
+        .replace(/^\d+\.\s*/, "")
+        .replace(/^PEDIDO ATUAL:\s*/, "")
+        .trim(),
+    )
+    .filter(Boolean);
+  return userLines.length ? userLines.join("\n") : analysisMessage;
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getClaims();
@@ -90,6 +106,7 @@ export async function POST(request: Request) {
       currentMessage: message,
       sourceMessageId,
     });
+    const userRoutineText = extractUserRoutineText(analysisMessage);
 
     const result = await analyzeAndApplyRoutineMessage({
       supabase,
@@ -101,17 +118,18 @@ export async function POST(request: Request) {
     if (result.handled) return NextResponse.json(result);
 
     // Pedidos simples e completos de notícias não podem depender apenas da
-    // classificação generativa. O fallback cria a rotina e evita duplicatas.
+    // classificação generativa. O fallback usa apenas as falas do usuário,
+    // cria a rotina e evita duplicatas.
     const fallback = await tryCreateNewsRoutineFallback({
       supabase,
       userId,
-      message: analysisMessage,
+      message: userRoutineText,
       source,
       timezone,
     });
     if (fallback) return NextResponse.json(fallback);
 
-    if (STRONG_ROUTINE_INTENT.test(analysisMessage)) {
+    if (STRONG_ROUTINE_INTENT.test(userRoutineText)) {
       return NextResponse.json({
         handled: true,
         operation: "clarification",
