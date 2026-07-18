@@ -172,9 +172,7 @@
   box-shadow: 0 0 0 3px rgba(77, 232, 255, 0.07);
 }
 
-.select {
-  appearance: auto;
-}
+.select { appearance: auto; }
 
 .dateWrap {
   width: 100%;
@@ -375,7 +373,7 @@
 
 @media (max-width: 820px) {
   .shell {
-    width: min(100% - 28px, 680px);
+    width: min(680px, calc(100% - 28px));
     padding: 30px 0 56px;
   }
   .header { align-items: flex-start; flex-direction: column; }
