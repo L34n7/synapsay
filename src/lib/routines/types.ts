@@ -42,11 +42,18 @@ export type AssistantRoutine = {
   timezone: string;
   start_time: string | null;
   end_time: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
   days_of_week: number[];
   max_executions_per_period: number;
   confirmation_mode: RoutineConfirmationMode;
   action_type: RoutineActionType;
   configuration: RoutineConfiguration;
+  adapt_from_memories: boolean;
+  suggest_adjustments: boolean;
+  feedback_interval: number;
+  execution_count: number;
+  last_feedback_at: string | null;
   created_via: "conversation" | "voice" | "page" | "system";
   created_at: string;
   updated_at: string;
@@ -57,4 +64,5 @@ export type RoutineOpportunity = {
   referenceKey: string;
   expiresAt: string | null;
   requiresConfirmation: boolean;
+  shouldAskFeedback?: boolean;
 };
