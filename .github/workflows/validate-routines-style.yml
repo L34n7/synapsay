@@ -17,4 +17,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install
-      - run: npm run build
+      - name: Build
+        id: build
+        continue-on-error: true
+        run: npm run build > build.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: routines-build-log
+          path: build.log
+      - name: Fail when build failed
+        if: steps.build.outcome == 'failure'
+        run: exit 1
