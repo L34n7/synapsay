@@ -14,6 +14,12 @@ type PendingPreview = {
   promise: Promise<void>;
 };
 
+type RTCDataChannelPayload =
+  | string
+  | Blob
+  | ArrayBuffer
+  | ArrayBufferView;
+
 declare global {
   interface Window {
     __synapsayVoicePreviewPatched?: boolean;
@@ -105,9 +111,12 @@ export function installRealtimeVoicePreviewPlayback() {
   }
 
   window.__synapsayVoicePreviewPatched = true;
-  const originalSend = RTCDataChannel.prototype.send;
+  const originalSend = RTCDataChannel.prototype.send as unknown as (
+    this: RTCDataChannel,
+    data: RTCDataChannelPayload,
+  ) => void;
 
-  RTCDataChannel.prototype.send = function patchedSend(data: string | ArrayBuffer | ArrayBufferView | Blob) {
+  RTCDataChannel.prototype.send = function patchedSend(data: RTCDataChannelPayload) {
     if (!isDashboard() || typeof data !== "string") {
       originalSend.call(this, data);
       return;
