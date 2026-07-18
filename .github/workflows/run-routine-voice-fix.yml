@@ -19,16 +19,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Apply patch from workflow source
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          source = Path('.github/workflows/apply-routine-voice-fix.yml').read_text()
-          start = source.index("          python - <<'PY'\n") + len("          python - <<'PY'\n")
-          end = source.index("\n          PY", start)
-          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end].splitlines())
-          exec(compile(code, 'routine_voice_patch.py', 'exec'))
-          PY
+      - name: Apply patch
+        run: python scripts/apply-routine-voice-fix.py
       - run: npm install
       - run: npm run build
       - name: Commit validated fix
