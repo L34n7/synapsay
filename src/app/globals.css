@@ -82,6 +82,26 @@ body h6 {
   line-height: 1.25;
 }
 
+/* Navegação lateral do núcleo: ícones mais legíveis e memória distinta da agenda. */
+[aria-label="Navegação principal"] :is(button, a) svg {
+  width: 21px !important;
+  height: 21px !important;
+}
+
+[aria-label="Navegação principal"] a[aria-label="Memórias"] svg {
+  display: none;
+}
+
+[aria-label="Navegação principal"] a[aria-label="Memórias"]::before {
+  content: "";
+  width: 22px;
+  height: 22px;
+  display: block;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 4.5A3.5 3.5 0 0 0 6 8v.4A3.5 3.5 0 0 0 4.5 15c0 1.7 1.2 3.1 2.8 3.4A3.5 3.5 0 0 0 14 17V7a3.5 3.5 0 0 0-4.5-2.5Z'/%3E%3Cpath d='M14 8.5h2.5M14 12h3.5M14 15.5h2.5M7.5 8.5H10M6.5 12H10M7.5 15.5H10'/%3E%3Ccircle cx='18.5' cy='8.5' r='1'/%3E%3Ccircle cx='19.5' cy='12' r='1'/%3E%3Ccircle cx='18.5' cy='15.5' r='1'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 4.5A3.5 3.5 0 0 0 6 8v.4A3.5 3.5 0 0 0 4.5 15c0 1.7 1.2 3.1 2.8 3.4A3.5 3.5 0 0 0 14 17V7a3.5 3.5 0 0 0-4.5-2.5Z'/%3E%3Cpath d='M14 8.5h2.5M14 12h3.5M14 15.5h2.5M7.5 8.5H10M6.5 12H10M7.5 15.5H10'/%3E%3Ccircle cx='18.5' cy='8.5' r='1'/%3E%3Ccircle cx='19.5' cy='12' r='1'/%3E%3Ccircle cx='18.5' cy='15.5' r='1'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
 @media (max-width: 768px) {
   html {
     font-size: 100%;
