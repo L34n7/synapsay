@@ -55,7 +55,7 @@ async function playPreview(voice: string) {
   activeSource = source;
 
   await new Promise<void>((resolve, reject) => {
-    source.addEventListener("ended", resolve, { once: true });
+    source.addEventListener("ended", () => resolve(), { once: true });
     try {
       source.start(0);
     } catch (reason) {
