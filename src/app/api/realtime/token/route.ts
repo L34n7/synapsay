@@ -226,13 +226,15 @@ export async function GET(request: Request) {
       `Data atual: ${new Date().toISOString()}; fuso: ${timeZone}.`,
     ].join(" "),
     [
-      "A ferramenta manage_tasks é o cérebro unificado de agenda e rotinas.",
-      "Use-a para tarefas, compromissos, lembretes e também para criar, editar, pausar, excluir, confirmar, recusar ou executar rotinas.",
-      "Sempre envie em message a fala completa do usuário, preservando datas, horários, fontes e preferências.",
-      "Quando a abertura mandar executar uma rotina automática, chame manage_tasks com a mensagem técnica exata fornecida, contendo EXECUTAR_ROTINA, routineId e referenceKey.",
-      "Quando houver rotina aguardando confirmação, após a resposta do usuário chame manage_tasks com a resposta completa, mesmo que seja apenas 'sim', 'agora não' ou 'não quero mais'.",
-      "Nunca diga que uma rotina foi criada ou alterada antes de a ferramenta confirmar success=true.",
-      "Falar frequentemente sobre um assunto não cria rotina: apenas permite sugerir, e a criação exige autorização explícita.",
+      "manage_tasks gerencia somente tarefas, compromissos e lembretes da agenda.",
+      "manage_routines gerencia exclusivamente rotinas recorrentes do assistente.",
+      "Para qualquer pedido de criar, agendar, programar, automatizar, alterar, pausar, excluir, confirmar ou executar uma rotina, você DEVE chamar manage_routines antes de responder.",
+      "Envie em message o pedido completo, reunindo detalhes relevantes das falas imediatamente anteriores: horário, recorrência, assunto, fontes e confirmação.",
+      "Para executar rotina automática da abertura, chame manage_routines com o comando técnico exato contendo EXECUTAR_ROTINA, routineId e referenceKey.",
+      "Para confirmar ou recusar rotina pendente, chame manage_routines mesmo que a resposta seja apenas sim, agora não ou não quero mais.",
+      "É proibido afirmar que uma rotina foi criada, configurada, alterada ou excluída sem receber success=true. Em caso de erro, informe que não foi salva.",
+      "Nunca diga que não existe ferramenta para rotinas: manage_routines está disponível.",
+      "Um interesse recorrente pode gerar sugestão, mas nunca cria rotina sem autorização explícita.",
     ].join(" "),
   ].join("\n\n");
 
@@ -333,8 +335,18 @@ export async function GET(request: Request) {
             {
               type: "function",
               name: "manage_tasks",
-              description:
-                "Cérebro unificado que gerencia agenda, lembretes e rotinas do assistente, incluindo briefings e confirmações.",
+              description: "Gerencia exclusivamente tarefas, compromissos e lembretes da agenda.",
+              parameters: {
+                type: "object",
+                additionalProperties: false,
+                required: ["message"],
+                properties: { message: { type: "string" } },
+              },
+            },
+            {
+              type: "function",
+              name: "manage_routines",
+              description: "Cria, atualiza, pausa, reativa, exclui, confirma e executa rotinas recorrentes. Use obrigatoriamente para qualquer pedido de rotina ou briefing recorrente.",
               parameters: {
                 type: "object",
                 additionalProperties: false,
@@ -342,8 +354,7 @@ export async function GET(request: Request) {
                 properties: {
                   message: {
                     type: "string",
-                    description:
-                      "Fala completa do usuário ou comando técnico de execução fornecido nas instruções de abertura.",
+                    description: "Pedido completo, incluindo detalhes relevantes das falas anteriores.",
                   },
                 },
               },
