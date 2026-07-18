@@ -11,9 +11,17 @@ type Routine = {
   recurrence_type: string;
   start_time: string | null;
   end_time: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+  days_of_week: number[];
+  max_executions_per_period: number;
   confirmation_mode: string;
   action_type: string;
-  configuration: { topics?: string[]; sources?: { value: string; label?: string }[]; sourcesOnly?: boolean };
+  adapt_from_memories: boolean;
+  suggest_adjustments: boolean;
+  feedback_interval: number;
+  execution_count: number;
+  configuration: { topics?: string[]; sources?: { value: string; label?: string }[]; sourcesOnly?: boolean; maxDurationSeconds?: number };
 };
 
 const emptyForm = {
@@ -24,6 +32,8 @@ const emptyForm = {
   recurrence_type: "daily",
   start_time: "08:00",
   end_time: "11:59",
+  starts_on: "",
+  ends_on: "",
   days_of_week: [0,1,2,3,4,5,6],
   max_executions_per_period: 1,
   confirmation_mode: "ask_first",
@@ -31,6 +41,10 @@ const emptyForm = {
   topics: "mundo",
   sources: "",
   sourcesOnly: false,
+  adapt_from_memories: true,
+  suggest_adjustments: true,
+  feedback_interval: 3,
+  maxDurationSeconds: 90,
 };
 
 export default function RoutinesPage() {
@@ -61,13 +75,15 @@ export default function RoutinesPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
+        starts_on: form.starts_on || null,
+        ends_on: form.ends_on || null,
         configuration: {
           topics: form.topics.split(",").map((value) => value.trim()).filter(Boolean),
           sources,
           sourcesOnly: form.sourcesOnly,
           delivery: "both",
           maxItems: 5,
-          maxDurationSeconds: 90,
+          maxDurationSeconds: form.maxDurationSeconds,
         },
         created_via: "page",
       }),
@@ -98,7 +114,7 @@ export default function RoutinesPage() {
       <header>
         <p className="text-sm text-muted-foreground">Assistente pessoal</p>
         <h1 className="text-3xl font-semibold tracking-tight">Rotinas</h1>
-        <p className="mt-2 max-w-3xl text-muted-foreground">Crie ações que o assistente oferece ou executa ao iniciar uma conversa dentro de uma janela de horário.</p>
+        <p className="mt-2 max-w-3xl text-muted-foreground">Configure ações recorrentes por janela de horário. As mesmas opções também podem ser criadas ou alteradas naturalmente pela conversa.</p>
       </header>
 
       <section className="rounded-2xl border bg-card p-5 shadow-sm md:p-6">
@@ -108,9 +124,15 @@ export default function RoutinesPage() {
           <label className="space-y-2"><span className="text-sm font-medium">Assuntos</span><input className="w-full rounded-xl border bg-background px-3 py-2" value={form.topics} onChange={(e) => setForm({ ...form, topics: e.target.value })} placeholder="mundo, tecnologia, IA" /></label>
           <label className="space-y-2"><span className="text-sm font-medium">A partir de</span><input type="time" className="w-full rounded-xl border bg-background px-3 py-2" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} /></label>
           <label className="space-y-2"><span className="text-sm font-medium">Até</span><input type="time" className="w-full rounded-xl border bg-background px-3 py-2" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} /></label>
+          <label className="space-y-2"><span className="text-sm font-medium">Iniciar na data</span><input type="date" className="w-full rounded-xl border bg-background px-3 py-2" value={form.starts_on} onChange={(e) => setForm({ ...form, starts_on: e.target.value })} /></label>
+          <label className="space-y-2"><span className="text-sm font-medium">Encerrar na data</span><input type="date" className="w-full rounded-xl border bg-background px-3 py-2" value={form.ends_on} onChange={(e) => setForm({ ...form, ends_on: e.target.value })} /><span className="block text-xs text-muted-foreground">Deixe vazio para continuar sem data final.</span></label>
           <label className="space-y-2"><span className="text-sm font-medium">Comportamento</span><select className="w-full rounded-xl border bg-background px-3 py-2" value={form.confirmation_mode} onChange={(e) => setForm({ ...form, confirmation_mode: e.target.value })}><option value="ask_first">Perguntar antes</option><option value="automatic">Executar automaticamente</option></select></label>
           <label className="space-y-2"><span className="text-sm font-medium">Sites específicos</span><input className="w-full rounded-xl border bg-background px-3 py-2" value={form.sources} onChange={(e) => setForm({ ...form, sources: e.target.value })} placeholder="g1.globo.com, theverge.com" /></label>
+          <label className="space-y-2"><span className="text-sm font-medium">Duração máxima</span><select className="w-full rounded-xl border bg-background px-3 py-2" value={form.maxDurationSeconds} onChange={(e) => setForm({ ...form, maxDurationSeconds: Number(e.target.value) })}><option value={30}>30 segundos</option><option value={60}>1 minuto</option><option value={90}>1 minuto e meio</option><option value={120}>2 minutos</option><option value={300}>5 minutos</option></select></label>
+          <label className="space-y-2"><span className="text-sm font-medium">Pedir opinião a cada</span><select className="w-full rounded-xl border bg-background px-3 py-2" value={form.feedback_interval} onChange={(e) => setForm({ ...form, feedback_interval: Number(e.target.value) })}><option value={1}>1 execução</option><option value={3}>3 execuções</option><option value={5}>5 execuções</option><option value={10}>10 execuções</option></select></label>
           <label className="flex items-center gap-3 md:col-span-2"><input type="checkbox" checked={form.sourcesOnly} onChange={(e) => setForm({ ...form, sourcesOnly: e.target.checked })} /><span className="text-sm">Usar somente os sites informados</span></label>
+          <label className="flex items-center gap-3 md:col-span-2"><input type="checkbox" checked={form.adapt_from_memories} onChange={(e) => setForm({ ...form, adapt_from_memories: e.target.checked })} /><span className="text-sm">Adaptar prioridades usando gostos e preferências aprovados nas memórias</span></label>
+          <label className="flex items-center gap-3 md:col-span-2"><input type="checkbox" checked={form.suggest_adjustments} onChange={(e) => setForm({ ...form, suggest_adjustments: e.target.checked })} /><span className="text-sm">Perguntar ocasionalmente se desejo mudar duração, assuntos ou fontes</span></label>
           {error ? <p className="text-sm text-destructive md:col-span-2">{error}</p> : null}
           <div className="md:col-span-2"><button disabled={saving} className="rounded-xl bg-primary px-5 py-2.5 font-medium text-primary-foreground disabled:opacity-50">{saving ? "Salvando..." : "Criar rotina"}</button></div>
         </form>
@@ -123,7 +145,9 @@ export default function RoutinesPage() {
             <div>
               <div className="flex items-center gap-2"><h3 className="font-semibold">{routine.name}</h3><span className={`rounded-full px-2 py-0.5 text-xs ${routine.active ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"}`}>{routine.active ? "Ativa" : "Pausada"}</span></div>
               <p className="mt-1 text-sm text-muted-foreground">{routine.start_time?.slice(0,5) ?? "00:00"}–{routine.end_time?.slice(0,5) ?? "23:59"} · {routine.confirmation_mode === "ask_first" ? "pergunta antes" : "automática"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{routine.starts_on ? `Início: ${routine.starts_on}` : "Disponível imediatamente"} · {routine.ends_on ? `Fim: ${routine.ends_on}` : "Sem data final"} · {routine.execution_count ?? 0} execução(ões)</p>
               <p className="mt-2 text-sm">{routine.configuration?.topics?.join(", ") || routine.description || "Rotina personalizada"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{routine.adapt_from_memories ? "Personaliza com memórias" : "Sem adaptação por memórias"} · {routine.suggest_adjustments ? `pede feedback a cada ${routine.feedback_interval} execução(ões)` : "não pede feedback"}</p>
             </div>
             <div className="flex gap-2"><button onClick={() => toggle(routine)} className="rounded-xl border px-3 py-2 text-sm">{routine.active ? "Pausar" : "Ativar"}</button><button onClick={() => remove(routine.id)} className="rounded-xl border px-3 py-2 text-sm text-destructive">Excluir</button></div>
           </article>
