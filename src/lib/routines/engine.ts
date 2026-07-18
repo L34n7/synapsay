@@ -73,13 +73,14 @@ export async function claimRoutineOpportunities({ supabase,userId,conversationId
 
 export function formatRoutineOpening(opportunities:RoutineOpportunity[]) {
   if (!opportunities.length) return "";
-  return opportunities.map(({routine,requiresConfirmation,shouldAskFeedback}) => {
+  return opportunities.map(({routine,referenceKey,requiresConfirmation,shouldAskFeedback}) => {
     const config=routine.configuration ?? {};
     const topics=[...(config.categories ?? []),...(config.topics ?? [])].join(", ");
     const sources=(config.sources ?? []).map((source) => source.label || source.value).join(", ");
     const feedback=shouldAskFeedback ? " Ao terminar, pergunte brevemente se o formato está bom ou se deseja mudar duração, assuntos ou fontes." : "";
-    if (requiresConfirmation) return `Existe uma rotina disponível chamada "${routine.name}". Pergunte de forma breve se o usuário quer executá-la agora. Não execute antes da confirmação.${feedback}`;
-    return `Execute agora a rotina "${routine.name}". Tipo: ${routine.action_type}. ${topics ? `Assuntos: ${topics}.` : ""} ${sources ? `Fontes: ${sources}.` : ""} ${config.sourcesOnly ? "Use somente as fontes configuradas." : "Fontes configuradas são preferenciais."} ${config.prompt ?? ""}${feedback}`;
+    const execution=`routineId=${routine.id}; referenceKey=${referenceKey}`;
+    if (requiresConfirmation) return `Existe uma rotina disponível chamada "${routine.name}" (${execution}). Pergunte de forma breve se o usuário quer executá-la agora. Se ele aceitar, chame manage_assistant_routines com action=confirm_and_execute e estes identificadores. Se recusar, use action=decline. Não execute antes da confirmação.${feedback}`;
+    return `Execute agora a rotina "${routine.name}" (${execution}) chamando manage_assistant_routines com action=execute. Tipo: ${routine.action_type}. ${topics ? `Assuntos: ${topics}.` : ""} ${sources ? `Fontes: ${sources}.` : ""} ${config.sourcesOnly ? "Use somente as fontes configuradas." : "Fontes configuradas são preferenciais."} ${config.prompt ?? ""}${feedback}`;
   }).join("\n");
 }
 
