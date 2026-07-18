@@ -1,0 +1,219 @@
+name: Apply validated routine fixes
+
+on:
+  push:
+    branches: [agent/corrigir-rotinas-completas]
+    paths:
+      - .github/workflows/apply-routine-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/corrigir-rotinas-completas
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply focused integration fixes
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          chat = Path('src/app/api/chat/route.ts')
+          text = chat.read_text(encoding='utf-8')
+
+          import_anchor = 'import { syncGoogleCalendarForUser, syncTaskToGoogle } from "@/lib/google-calendar/sync";\n'
+          import_block = import_anchor + '''import { analyzeAndApplyRoutineMessage } from "@/lib/routines/brain";
+          import { resolvePendingRoutine } from "@/lib/routines/executor";
+          import { resolvePendingRoutineSuggestion } from "@/lib/routines/suggestions";
+          '''.replace('          ', '')
+          if 'analyzeAndApplyRoutineMessage' not in text:
+              if import_anchor not in text:
+                  raise SystemExit('chat import anchor not found')
+              text = text.replace(import_anchor, import_block, 1)
+
+          embed_anchor = '''  await embedHistoryMessage({
+            supabase,
+            userId,
+            messageId: userMessageId,
+            content,
+          });
+          '''.replace('          ', '')
+
+          routine_block = embed_anchor + '''
+          let routineReply: string | null = null;
+          try {
+            const { data: routineProfile } = await supabase
+              .from("profiles")
+              .select("timezone")
+              .eq("id", userId)
+              .maybeSingle();
+            const routineTimezone =
+              typeof routineProfile?.timezone === "string" && routineProfile.timezone.trim()
+                ? routineProfile.timezone.trim()
+                : "America/Sao_Paulo";
+
+            const pendingRoutine = await resolvePendingRoutine({
+              supabase,
+              userId,
+              message: content,
+            });
+            if (pendingRoutine?.handled) {
+              routineReply = pendingRoutine.summary;
+            }
+
+            if (!routineReply) {
+              const pendingSuggestion = await resolvePendingRoutineSuggestion({
+                supabase,
+                userId,
+                message: content,
+                timezone: routineTimezone,
+              });
+              if (pendingSuggestion?.handled) {
+                routineReply = pendingSuggestion.summary;
+              }
+            }
+
+            if (!routineReply) {
+              const routineResult = await analyzeAndApplyRoutineMessage({
+                supabase,
+                userId,
+                message: content,
+                source: "text",
+                timezone: routineTimezone,
+              });
+              if (routineResult.handled) {
+                routineReply = routineResult.summary;
+              }
+            }
+          } catch (reason) {
+            console.warn("Cérebro de rotinas indisponível no chat:", reason);
+          }
+
+          if (routineReply) {
+            let structuredAssistantId = existingAssistant?.id ?? null;
+            if (structuredAssistantId) {
+              const { error } = await supabase
+                .from("messages")
+                .update({
+                  content: routineReply,
+                  generation_status: "completed",
+                  error_message: null,
+                  metadata: {
+                    client_message_id: clientMessageId,
+                    reply_to_external_event_id: userEventId,
+                    structured_operation: "assistant_routine",
+                  },
+                })
+                .eq("id", structuredAssistantId)
+                .eq("user_id", userId);
+              if (error) {
+                return NextResponse.json(
+                  { error: "A rotina foi processada, mas a confirmação não pôde ser salva." },
+                  { status: 500 },
+                );
+              }
+            } else {
+              const { data: structuredAssistant, error } = await supabase
+                .from("messages")
+                .insert({
+                  conversation_id: conversationId,
+                  user_id: userId,
+                  role: "assistant",
+                  content: routineReply,
+                  input_type: "text",
+                  external_event_id: assistantEventId,
+                  generation_status: "completed",
+                  metadata: {
+                    client_message_id: clientMessageId,
+                    reply_to_external_event_id: userEventId,
+                    structured_operation: "assistant_routine",
+                  },
+                })
+                .select("id")
+                .single();
+              if (error || !structuredAssistant) {
+                return NextResponse.json(
+                  { error: "A rotina foi processada, mas a confirmação não pôde ser salva." },
+                  { status: 500 },
+                );
+              }
+              structuredAssistantId = structuredAssistant.id;
+            }
+
+            const structuredActivityTime = new Date().toISOString();
+            const structuredConversationUpdate: Record<string, string | null> = {
+              last_message_at: structuredActivityTime,
+              status: "active",
+              ended_at: null,
+              end_reason: null,
+            };
+            if (!conversation.title) {
+              structuredConversationUpdate.title = content.slice(0, 80);
+              structuredConversationUpdate.title_source = "first_message";
+            }
+            await supabase
+              .from("conversations")
+              .update(structuredConversationUpdate)
+              .eq("id", conversationId)
+              .eq("user_id", userId);
+
+            return replayCompletedResponse({
+              assistantId: structuredAssistantId,
+              userId: userMessageId,
+              content: routineReply,
+            });
+          }
+          '''.replace('          ', '')
+
+          if 'structured_operation: "assistant_routine"' not in text:
+              if embed_anchor not in text:
+                  raise SystemExit('chat embedding anchor not found')
+              text = text.replace(embed_anchor, routine_block, 1)
+
+          chat.write_text(text, encoding='utf-8')
+
+          dashboard = Path('src/app/dashboard/page.tsx')
+          dashboard_text = dashboard.read_text(encoding='utf-8')
+          agenda_anchor = '        <a href="/agenda" aria-label="Agenda"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 2v4M16 2v4M5 9h14M8 13h3M13 13h3M8 17h3" /></svg></a>\n'
+          routines_link = agenda_anchor + '        <a href="/rotinas" aria-label="Rotinas"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7M17 11l3 3-3 3" /></svg></a>\n'
+          if 'href="/rotinas"' not in dashboard_text:
+              if agenda_anchor not in dashboard_text:
+                  raise SystemExit('dashboard agenda link anchor not found')
+              dashboard_text = dashboard_text.replace(agenda_anchor, routines_link, 1)
+          dashboard.write_text(dashboard_text, encoding='utf-8')
+
+          token = Path('src/app/api/realtime/token/route.ts')
+          token_text = token.read_text(encoding='utf-8')
+          instruction_anchor = '      "Use-a para tarefas, compromissos, lembretes e também para criar, editar, pausar, excluir, confirmar, recusar ou executar rotinas.",\n'
+          instruction_replacement = instruction_anchor + '      "Pedidos com verbos como agendar, programar ou automatizar um briefing, notícias ou assunto recorrente também são rotinas e exigem a chamada desta ferramenta.",\n'
+          if 'Pedidos com verbos como agendar' not in token_text:
+              if instruction_anchor not in token_text:
+                  raise SystemExit('realtime routine instruction anchor not found')
+              token_text = token_text.replace(instruction_anchor, instruction_replacement, 1)
+          token.write_text(token_text, encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate production build
+        run: npm run build
+
+      - name: Commit validated changes
+        run: |
+          rm .github/workflows/apply-routine-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/chat/route.ts src/app/dashboard/page.tsx src/app/api/realtime/token/route.ts .github/workflows/apply-routine-fixes.yml
+          git commit -m "Complete routine creation and navigation"
+          git push origin agent/corrigir-rotinas-completas
