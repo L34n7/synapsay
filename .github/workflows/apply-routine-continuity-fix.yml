@@ -1,0 +1,143 @@
+name: Apply routine continuity fix
+
+on:
+  push:
+    branches: [agent/corrigir-confirmacao-e-continuidade-rotinas]
+    paths:
+      - .github/workflows/apply-routine-continuity-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/corrigir-confirmacao-e-continuidade-rotinas
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply targeted patches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          continuity = Path('src/lib/continuity/cache.ts')
+          text = continuity.read_text()
+
+          old_type = '''type ResponsesPayload = {
+            output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+            error?: { message?: string };
+          };'''
+          new_type = '''type ResponsesPayload = {
+            output_text?: string;
+            output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+            status?: string;
+            incomplete_details?: { reason?: string };
+            error?: { message?: string };
+          };'''
+          if old_type not in text:
+              raise SystemExit('ResponsesPayload block not found')
+          text = text.replace(old_type, new_type, 1)
+
+          old_output = '''function outputText(payload: ResponsesPayload) {
+            return (payload.output ?? [])
+              .flatMap((item) => item.content ?? [])
+              .filter((item) => item.type === "output_text" && item.text)
+              .map((item) => item.text)
+              .join("");
+          }'''
+          new_output = '''function outputText(payload: ResponsesPayload) {
+            if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+              return payload.output_text.trim();
+            }
+            return (payload.output ?? [])
+              .flatMap((item) => item.content ?? [])
+              .filter((item) => item.type === "output_text" && item.text)
+              .map((item) => item.text)
+              .join("")
+              .trim();
+          }'''
+          if old_output not in text:
+              raise SystemExit('outputText block not found')
+          text = text.replace(old_output, new_output, 1)
+
+          if 'max_output_tokens: 1800,' not in text:
+              raise SystemExit('continuity token limit not found')
+          text = text.replace(
+              'max_output_tokens: 1800,',
+              'max_output_tokens: 6000,\n        reasoning: { effort: "low" },',
+              1,
+          )
+
+          old_empty = '''    const text = outputText(payload);
+              if (!text) throw new Error("A continuidade não retornou um resultado válido.");
+              const parsed = parseContinuity(text);'''
+          new_empty = '''    const text = outputText(payload);
+              if (!text) {
+                const detail =
+                  payload.incomplete_details?.reason ||
+                  payload.status ||
+                  "resposta sem texto estruturado";
+                const warning = `Continuidade preservada: ${detail}`;
+                console.warn(warning, {
+                  model: AI_MODELS.memoryBrain,
+                  status: payload.status,
+                  incompleteDetails: payload.incomplete_details,
+                });
+                await supabase
+                  .from("assistant_continuity")
+                  .update({
+                    status: previous ? "ready" : "failed",
+                    last_error: warning.slice(0, 500),
+                  })
+                  .eq("user_id", userId);
+                return {
+                  refreshed: false,
+                  preserved: Boolean(previous),
+                  messageCount: messages.length,
+                  processedUntil: lastMessage?.created_at ?? processingAt,
+                };
+              }
+              const parsed = parseContinuity(text);'''
+          if old_empty not in text:
+              raise SystemExit('empty continuity result block not found')
+          text = text.replace(old_empty, new_empty, 1)
+          continuity.write_text(text)
+
+          brain = Path('src/lib/routines/brain.ts')
+          text = brain.read_text()
+          if 'max_output_tokens: 1000,' not in text:
+              raise SystemExit('routine classifier token limit not found')
+          text = text.replace(
+              'max_output_tokens: 1000,',
+              'max_output_tokens: 3500,\n      reasoning: { effort: "low" },',
+              1,
+          )
+          if 'max_output_tokens: 120,' not in text:
+              raise SystemExit('interest classifier token limit not found')
+          text = text.replace(
+              'max_output_tokens: 120,',
+              'max_output_tokens: 600,\n      reasoning: { effort: "low" },',
+              1,
+          )
+          brain.write_text(text)
+          PY
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Commit validated changes and remove temporary workflow
+        run: |
+          rm .github/workflows/apply-routine-continuity-fix.yml
+          git config user.name "synapsay-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/continuity/cache.ts src/lib/routines/brain.ts .github/workflows/apply-routine-continuity-fix.yml
+          git commit -m "Stabilize routine classification and continuity output"
+          git push origin HEAD:agent/corrigir-confirmacao-e-continuidade-rotinas
