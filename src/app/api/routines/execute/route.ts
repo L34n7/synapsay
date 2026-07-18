@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "gpt-5-mini",
-        tools: routine.action_type === "news_briefing" ? [{ type: "web_search_preview" }] : [],
+        tools: routine.action_type === "news_briefing" ? [{ type: "web_search" }] : [],
         input: buildPrompt(routine),
       }),
     });
