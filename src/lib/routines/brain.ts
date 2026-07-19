@@ -1,4 +1,5 @@
 import { AI_MODELS } from "@/lib/ai/models";
+import { responseOutputText } from "@/lib/ai/responses";
 import { validRoutineTimeZone } from "@/lib/routines/engine";
 import type { AssistantRoutine } from "@/lib/routines/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -62,8 +63,7 @@ type RoutineOperation = {
 const routineWords = /(?:rotina|agend(?:a|ar|e|ado|amento)|program(?:a|ar|e|ado|ação)|automatiz(?:a|ar|e|ado|ação)|todo dia|todos os dias|diariamente|semanalmente|toda semana|primeira conversa|ao iniciar|quando eu (?:iniciar|abrir|falar|conversar)|sempre que|depois das|a partir das|antes das|pela manhã|de manhã|ao meio-dia|depois do trabalho|me pergunte antes|não pergunte|\b(?:duas|três|tres|quatro|cinco|\d+) vezes\b|resumo|briefing|notícias do dia|notícias pela manhã|pare de falar|pause|desative|reative|exclua|muito longo|mais curto|mais tecnologia|menos política|fonte|site específico|estou gostando|não estou gostando)/i;
 
 function outputText(data: unknown) {
-  if (!data || typeof data !== "object") return "";
-  return String((data as { output_text?: unknown }).output_text ?? "").trim();
+  return responseOutputText(data);
 }
 
 function parseOperation(data: unknown): RoutineOperation | null {

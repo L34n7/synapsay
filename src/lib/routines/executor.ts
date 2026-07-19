@@ -1,4 +1,5 @@
 import { AI_MODELS } from "@/lib/ai/models";
+import { responseDiagnostic, responseOutputText } from "@/lib/ai/responses";
 import type { AssistantRoutine, NewsSource } from "@/lib/routines/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -283,8 +284,16 @@ export async function executeRoutine({
     if (!response.ok) {
       throw new Error(data?.error?.message ?? "Falha ao gerar briefing.");
     }
-    const content = String(data.output_text ?? "").trim();
-    if (!content) throw new Error("O briefing retornou vazio.");
+    const content = responseOutputText(data);
+    if (!content) {
+      const diagnostic = responseDiagnostic(data);
+      console.error("Resposta da rotina concluída sem texto utilizável.", diagnostic);
+      throw new Error(
+        diagnostic.incompleteReason
+          ? `O briefing ficou incompleto (${diagnostic.incompleteReason}). Tente novamente.`
+          : "A geração terminou sem texto utilizável. Tente novamente.",
+      );
+    }
     const sources = extractSources(data);
 
     if (!isTest && !executionInstruction) {
