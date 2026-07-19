@@ -64,17 +64,6 @@ function outputText(payload: ResponsesPayload) {
     .join("");
 }
 
-export async function interpretHistoryIntent({
-  userId,
-  currentMessage,
-  recentMessages,
-  lastSearch,
-}: {
-  userId: string;
-  currentMessage: string;
-  recentMessages: Array<{ role: string; content: string }>;
-  lastSearch?: unknown;
-}): Promise<HistoryIntent> {
 export function emptyHistoryIntent(): HistoryIntent {
   return {
     shouldSearch: false,
@@ -91,15 +80,24 @@ export function emptyHistoryIntent(): HistoryIntent {
 export function shouldCheckHistoryIntent(value: string) {
   const normalized = value
     .normalize("NFD")
-    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  return /\\b(lembra|recorda|eu falei|eu disse|ja disse|ja falei|conversa antiga|conversa anterior|outro dia|antes|historico|histórico|trecho|mensagem antiga|recupera|recuperar|buscar|procura|quando eu|o que eu tinha|qual era)\\b/.test(
+  return /\b(lembra|recorda|eu falei|eu disse|ja disse|ja falei|conversa antiga|conversa anterior|outro dia|antes|historico|trecho|mensagem antiga|recupera|recuperar|buscar|procura|quando eu|o que eu tinha|qual era)\b/.test(
     normalized,
   );
 }
 
-const fallback: HistoryIntent = emptyHistoryIntent();
-
+export async function interpretHistoryIntent({
+  userId,
+  currentMessage,
+  recentMessages,
+  lastSearch,
+}: {
+  userId: string;
+  currentMessage: string;
+  recentMessages: Array<{ role: string; content: string }>;
+  lastSearch?: unknown;
+}): Promise<HistoryIntent> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return fallback;
 
