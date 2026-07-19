@@ -19,7 +19,7 @@ function configuredMemoryModel(variable: string | undefined, fallback: string) {
   const value = variable?.trim();
   // Migra automaticamente a configuração anterior, que usava Luna
   // para classificadores e rotinas de segundo plano.
-  if (!value || value === "gpt-5.6-luna") return fallback;
+  if (!value || value === "gpt-5.6-luna" || value === "pt-5.6-luna") return fallback;
   return configuredModel(value, fallback);
 }
 
