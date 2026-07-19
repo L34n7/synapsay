@@ -124,6 +124,8 @@ export function installRealtimeVoicePreviewPlayback() {
 
     const parsed = parsePreviewOutput(data);
     if (parsed) {
+      // A referencia precisa sobreviver ate o fim da reproducao assincrona.
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       const channel = this;
       const promise = playPreview(parsed.output.previewVoice as string)
         .then(() => {

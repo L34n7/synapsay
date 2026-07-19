@@ -1,4 +1,7 @@
 import { AI_MODELS } from "@/lib/ai/models";
+import { validRoutineTimeZone } from "@/lib/routines/engine";
+import type { AssistantRoutine } from "@/lib/routines/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type RoutineBrainResult = {
   handled: boolean;
@@ -9,7 +12,7 @@ export type RoutineBrainResult = {
 };
 
 type Args = {
-  supabase: any;
+  supabase: SupabaseClient;
   userId: string;
   message: string;
   source: "text" | "voice";
@@ -49,19 +52,21 @@ type RoutineOperation = {
   adaptFromMemories: boolean | null;
   suggestAdjustments: boolean | null;
   feedbackInterval: number | null;
+  maxExecutionsPerPeriod: number | null;
   feedbackSentiment: "positive" | "negative" | "neutral" | "preference" | null;
   feedbackMessage: string | null;
   topicSignal: string | null;
   localPeriod: "morning" | "afternoon" | "evening" | null;
 };
 
-const routineWords = /(?:rotina|agend(?:a|ar|e|ado|amento)|program(?:a|ar|e|ado|ação)|automatiz(?:a|ar|e|ado|ação)|todo dia|todos os dias|diariamente|semanalmente|toda semana|primeira conversa|ao iniciar|quando eu (?:iniciar|abrir|falar|conversar)|sempre que|depois das|a partir das|antes das|pela manhã|de manhã|ao meio-dia|depois do trabalho|me pergunte antes|não pergunte|resumo|briefing|notícias do dia|notícias pela manhã|pare de falar|pause|desative|reative|exclua|muito longo|mais curto|mais tecnologia|menos política|fonte|site específico|estou gostando|não estou gostando)/i;
+const routineWords = /(?:rotina|agend(?:a|ar|e|ado|amento)|program(?:a|ar|e|ado|ação)|automatiz(?:a|ar|e|ado|ação)|todo dia|todos os dias|diariamente|semanalmente|toda semana|primeira conversa|ao iniciar|quando eu (?:iniciar|abrir|falar|conversar)|sempre que|depois das|a partir das|antes das|pela manhã|de manhã|ao meio-dia|depois do trabalho|me pergunte antes|não pergunte|\b(?:duas|três|tres|quatro|cinco|\d+) vezes\b|resumo|briefing|notícias do dia|notícias pela manhã|pare de falar|pause|desative|reative|exclua|muito longo|mais curto|mais tecnologia|menos política|fonte|site específico|estou gostando|não estou gostando)/i;
 
-function outputText(data: any) {
-  return String(data?.output_text ?? "").trim();
+function outputText(data: unknown) {
+  if (!data || typeof data !== "object") return "";
+  return String((data as { output_text?: unknown }).output_text ?? "").trim();
 }
 
-function parseOperation(data: any): RoutineOperation | null {
+function parseOperation(data: unknown): RoutineOperation | null {
   const text = outputText(data);
   if (!text) return null;
 
@@ -102,6 +107,7 @@ function routineSchema() {
       "adaptFromMemories",
       "suggestAdjustments",
       "feedbackInterval",
+      "maxExecutionsPerPeriod",
       "feedbackSentiment",
       "feedbackMessage",
       "topicSignal",
@@ -142,6 +148,11 @@ function routineSchema() {
       adaptFromMemories: { type: ["boolean", "null"] },
       suggestAdjustments: { type: ["boolean", "null"] },
       feedbackInterval: { type: ["number", "null"], minimum: 1, maximum: 30 },
+      maxExecutionsPerPeriod: {
+        type: ["number", "null"],
+        minimum: 1,
+        maximum: 10,
+      },
       feedbackSentiment: {
         type: ["string", "null"],
         enum: ["positive", "negative", "neutral", "preference", null],
@@ -156,7 +167,7 @@ function routineSchema() {
   };
 }
 
-async function classify(args: Args, routines: any[]) {
+async function classify(args: Args, routines: AssistantRoutine[]) {
   if (!process.env.OPENAI_API_KEY) return null;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -188,6 +199,7 @@ async function classify(args: Args, routines: any[]) {
             "Datas devem usar AAAA-MM-DD e horários HH:mm.",
             "Quando o usuário disser a partir de um horário e não informar o fim, use 23:59.",
             "Quando não houver pedido explícito para executar automaticamente, use confirmationMode=ask_first.",
+            "Preencha maxExecutionsPerPeriod somente quando o usuário pedir mais de uma oportunidade no mesmo dia ou semana; caso contrário use 1.",
             "Para notícias, use actionType=news_briefing. Para um conteúdo livre, use custom_briefing.",
             "Preserve campos não mencionados em atualizações usando null ou arrays vazios.",
             `Fuso: ${args.timezone ?? "America/Sao_Paulo"}.`,
@@ -235,7 +247,7 @@ function normalizeSources(sources: unknown) {
     .slice(0, 20);
 }
 
-function speechFor(op: RoutineOperation, routine?: any) {
+function speechFor(op: RoutineOperation, routine?: Partial<AssistantRoutine>) {
   switch (op.operation) {
     case "create": {
       const start = routine?.start_time?.slice(0, 5) ?? op.startTime ?? "08:00";
@@ -275,8 +287,9 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
     .limit(30);
 
   if (routinesError) throw routinesError;
+  const typedRoutines = (routines ?? []) as AssistantRoutine[];
 
-  const op = await classify(args, routines ?? []);
+  const op = await classify(args, typedRoutines);
   if (!op || op.operation === "none" || op.operation === "signal") {
     if (op?.operation === "signal") await recordInterestSignal(args).catch(() => null);
     return { handled: false, summary: "", operation: op?.operation ?? "none" };
@@ -293,7 +306,7 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
       active: true,
       trigger_type: "conversation_window",
       recurrence_type: recurrenceType,
-      timezone: args.timezone ?? "America/Sao_Paulo",
+      timezone: validRoutineTimeZone(args.timezone),
       start_time: op.startTime || "08:00",
       end_time: op.endTime || "23:59",
       starts_on: op.startsOn || null,
@@ -302,7 +315,10 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
         Array.isArray(op.daysOfWeek) && op.daysOfWeek.length
           ? op.daysOfWeek
           : [0, 1, 2, 3, 4, 5, 6],
-      max_executions_per_period: 1,
+      max_executions_per_period: Math.max(
+        1,
+        Math.min(10, Number(op.maxExecutionsPerPeriod) || 1),
+      ),
       confirmation_mode: confirmationMode,
       action_type: op.actionType || "news_briefing",
       adapt_from_memories: op.adaptFromMemories !== false,
@@ -351,7 +367,7 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
         .eq("user_id", args.userId);
       if (error) throw error;
     } else {
-      const target = (routines ?? []).find((routine: any) => routine.id === op.targetId);
+      const target = typedRoutines.find((routine) => routine.id === op.targetId);
       if (!target) {
         return {
           handled: true,
@@ -392,6 +408,12 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
       if (op.feedbackInterval) {
         patch.feedback_interval = Math.max(1, Math.min(30, Number(op.feedbackInterval)));
       }
+      if (op.maxExecutionsPerPeriod) {
+        patch.max_executions_per_period = Math.max(
+          1,
+          Math.min(10, Number(op.maxExecutionsPerPeriod)),
+        );
+      }
 
       const { error } = await args.supabase
         .from("assistant_routines")
@@ -428,7 +450,7 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
       });
     if (feedbackError) throw feedbackError;
 
-    const target = (routines ?? []).find((routine: any) => routine.id === op.targetId);
+    const target = typedRoutines.find((routine) => routine.id === op.targetId);
     if (target && (op.topics?.length || op.categories?.length || op.maxDurationSeconds)) {
       const { error } = await args.supabase
         .from("assistant_routines")
@@ -446,6 +468,12 @@ export async function analyzeAndApplyRoutineMessage(args: Args): Promise<Routine
         .eq("user_id", args.userId);
       if (error) throw error;
     }
+
+    await args.supabase
+      .from("assistant_routines")
+      .update({ last_feedback_at: new Date().toISOString() })
+      .eq("id", op.targetId)
+      .eq("user_id", args.userId);
 
     return {
       handled: true,
