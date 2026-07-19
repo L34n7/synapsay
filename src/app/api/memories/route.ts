@@ -6,6 +6,9 @@ import {
 } from "@/lib/memory/normalize";
 import { createClient } from "@/lib/supabase/server";
 
+const DEFAULT_PAGE_SIZE = 12;
+const MAX_PAGE_SIZE = 50;
+
 export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getClaims();
@@ -17,16 +20,27 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const review = url.searchParams.get("review");
   const status = url.searchParams.get("status");
+  const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+  const requestedPageSize = Number.parseInt(
+    url.searchParams.get("pageSize") ?? String(DEFAULT_PAGE_SIZE),
+    10,
+  );
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const pageSize = Number.isFinite(requestedPageSize)
+    ? Math.min(MAX_PAGE_SIZE, Math.max(1, requestedPageSize))
+    : DEFAULT_PAGE_SIZE;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
 
   let query = supabase
     .from("memories")
     .select(
       "id, title, content, category, importance, status, review_status, memory_type, expires_at, source, created_at, updated_at",
+      { count: "exact" },
     )
     .eq("user_id", userId)
     .neq("status", "forgotten")
-    .order("updated_at", { ascending: false })
-    .limit(250);
+    .order("updated_at", { ascending: false });
 
   if (["pending", "approved", "rejected"].includes(review ?? "")) {
     query = query.eq("review_status", review);
@@ -35,15 +49,55 @@ export async function GET(request: Request) {
     query = query.eq("status", status);
   }
 
-  const { data, error } = await query;
-  if (error) {
+  const [pageResult, activeResult, archivedResult, totalResult] = await Promise.all([
+    query.range(from, to),
+    supabase
+      .from("memories")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("review_status", "approved")
+      .eq("status", "active"),
+    supabase
+      .from("memories")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("status", "archived"),
+    supabase
+      .from("memories")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .neq("status", "forgotten"),
+  ]);
+
+  if (
+    pageResult.error ||
+    activeResult.error ||
+    archivedResult.error ||
+    totalResult.error
+  ) {
     return NextResponse.json(
       { error: "Não foi possível carregar as memórias." },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ memories: data });
+  const total = pageResult.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  return NextResponse.json({
+    memories: pageResult.data ?? [],
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+    },
+    counts: {
+      approved: activeResult.count ?? 0,
+      archived: archivedResult.count ?? 0,
+      all: totalResult.count ?? 0,
+    },
+  });
 }
 
 export async function POST(request: Request) {
