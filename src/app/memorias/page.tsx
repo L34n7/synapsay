@@ -29,6 +29,17 @@ type Draft = {
 
 type Filter = "approved" | "archived" | "all";
 
+type MemoryCounts = Record<Filter, number>;
+
+type Pagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+const PAGE_SIZE = 12;
+
 const categories = [
   "preference",
   "personal",
@@ -64,6 +75,19 @@ const emptyDraft: Draft = {
   expiresAt: "",
 };
 
+const initialCounts: MemoryCounts = {
+  approved: 0,
+  archived: 0,
+  all: 0,
+};
+
+const initialPagination: Pagination = {
+  page: 1,
+  pageSize: PAGE_SIZE,
+  total: 0,
+  totalPages: 1,
+};
+
 function toLocalDateTime(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -82,9 +106,35 @@ function memoryToDraft(memory: Memory): Draft {
   };
 }
 
+function buildMemoryQuery(filter: Filter, page: number) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(PAGE_SIZE),
+  });
+
+  if (filter === "approved") {
+    params.set("review", "approved");
+    params.set("status", "active");
+  } else if (filter === "archived") {
+    params.set("status", "archived");
+  }
+
+  return params.toString();
+}
+
+function paginationItems(currentPage: number, totalPages: number) {
+  const pages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+  return [...pages]
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b);
+}
+
 export default function MemoriesPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [filter, setFilter] = useState<Filter>("approved");
+  const [page, setPage] = useState(1);
+  const [counts, setCounts] = useState<MemoryCounts>(initialCounts);
+  const [pagination, setPagination] = useState<Pagination>(initialPagination);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -96,44 +146,38 @@ export default function MemoriesPage() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/memories", { cache: "no-store" });
+      const response = await fetch(
+        `/api/memories?${buildMemoryQuery(filter, page)}`,
+        { cache: "no-store" },
+      );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao carregar memórias.");
+
+      const nextPagination = data.pagination ?? initialPagination;
+      if (page > nextPagination.totalPages) {
+        setPage(nextPagination.totalPages);
+        return;
+      }
+
       setMemories(data.memories ?? []);
+      setCounts(data.counts ?? initialCounts);
+      setPagination(nextPagination);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao carregar memórias.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filter, page]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadMemories(), 0);
     return () => window.clearTimeout(timer);
   }, [loadMemories]);
 
-  const counts = useMemo(
-    () => ({
-      approved: memories.filter(
-        (memory) => memory.review_status === "approved" && memory.status === "active",
-      ).length,
-      archived: memories.filter((memory) => memory.status === "archived").length,
-      all: memories.length,
-    }),
-    [memories],
+  const pages = useMemo(
+    () => paginationItems(pagination.page, pagination.totalPages),
+    [pagination.page, pagination.totalPages],
   );
-
-  const visibleMemories = useMemo(() => {
-    if (filter === "approved") {
-      return memories.filter(
-        (memory) => memory.review_status === "approved" && memory.status === "active",
-      );
-    }
-    if (filter === "archived") {
-      return memories.filter((memory) => memory.status === "archived");
-    }
-    return memories;
-  }, [filter, memories]);
 
   async function patchMemory(id: string, payload: Record<string, unknown>) {
     setBusyId(id);
@@ -146,10 +190,8 @@ export default function MemoriesPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao atualizar memória.");
-      setMemories((current) =>
-        current.map((memory) => (memory.id === id ? data.memory : memory)),
-      );
       setEditingId(null);
+      await loadMemories();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao atualizar memória.");
     } finally {
@@ -171,7 +213,7 @@ export default function MemoriesPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao esquecer memória.");
-      setMemories((current) => current.filter((item) => item.id !== memory.id));
+      await loadMemories();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao esquecer memória.");
     } finally {
@@ -190,10 +232,13 @@ export default function MemoriesPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao criar memória.");
-      setMemories((current) => [data.memory, ...current]);
       setDraft(emptyDraft);
       setAdding(false);
       setFilter("approved");
+      setPage(1);
+      if (filter === "approved" && page === 1) {
+        await loadMemories();
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao criar memória.");
     } finally {
@@ -205,6 +250,19 @@ export default function MemoriesPage() {
     setAdding(false);
     setEditingId(memory.id);
     setDraft(memoryToDraft(memory));
+  }
+
+  function changeFilter(nextFilter: Filter) {
+    setEditingId(null);
+    setFilter(nextFilter);
+    setPage(1);
+  }
+
+  function changePage(nextPage: number) {
+    if (nextPage === page || nextPage < 1 || nextPage > pagination.totalPages) return;
+    setEditingId(null);
+    setPage(nextPage);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   return (
@@ -249,7 +307,7 @@ export default function MemoriesPage() {
                 <button
                   key={item}
                   className={filter === item ? styles.activeFilter : ""}
-                  onClick={() => setFilter(item)}
+                  onClick={() => changeFilter(item)}
                 >
                   {item === "approved" && "Ativas"}
                   {item === "archived" && "Arquivadas"}
@@ -286,7 +344,7 @@ export default function MemoriesPage() {
 
         <div className={styles.memoryGrid}>
           {loading && <div className={styles.empty}>SINCRONIZANDO MEMÓRIAS...</div>}
-          {!loading && !visibleMemories.length && (
+          {!loading && !memories.length && (
             <div className={styles.empty}>
               <span>○</span>
               <strong>NENHUMA MEMÓRIA NESTA CAMADA</strong>
@@ -294,7 +352,7 @@ export default function MemoriesPage() {
             </div>
           )}
 
-          {visibleMemories.map((memory) =>
+          {!loading && memories.map((memory) =>
             editingId === memory.id ? (
               <MemoryEditor
                 key={memory.id}
@@ -368,9 +426,84 @@ export default function MemoriesPage() {
             ),
           )}
         </div>
+
+        {!loading && pagination.totalPages > 1 && (
+          <nav
+            aria-label="Paginação de memórias"
+            style={{
+              marginTop: 28,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            <button
+              type="button"
+              disabled={page === 1}
+              onClick={() => changePage(page - 1)}
+              style={paginationButtonStyle(false, page === 1)}
+            >
+              ANTERIOR
+            </button>
+            {pages.map((item, index) => {
+              const previous = pages[index - 1];
+              return (
+                <span key={item} style={{ display: "contents" }}>
+                  {previous && item - previous > 1 && (
+                    <span style={{ color: "#555261", padding: "0 4px" }}>…</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-current={item === page ? "page" : undefined}
+                    onClick={() => changePage(item)}
+                    style={paginationButtonStyle(item === page, false)}
+                  >
+                    {item}
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              type="button"
+              disabled={page === pagination.totalPages}
+              onClick={() => changePage(page + 1)}
+              style={paginationButtonStyle(false, page === pagination.totalPages)}
+            >
+              PRÓXIMA
+            </button>
+            <span
+              style={{
+                marginLeft: 8,
+                color: "#696678",
+                font: "600 11px var(--font-geist-mono)",
+                letterSpacing: 1,
+              }}
+            >
+              PÁGINA {pagination.page} DE {pagination.totalPages} · {pagination.total} ITENS
+            </span>
+          </nav>
+        )}
       </section>
     </main>
   );
+}
+
+function paginationButtonStyle(active: boolean, disabled: boolean): React.CSSProperties {
+  return {
+    minWidth: 38,
+    height: 38,
+    padding: "0 12px",
+    color: active ? "#d9faff" : "#8d899b",
+    border: `1px solid ${active ? "rgba(77,232,255,.32)" : "rgba(255,255,255,.09)"}`,
+    borderRadius: 9,
+    background: active ? "rgba(77,232,255,.09)" : "rgba(255,255,255,.025)",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.4 : 1,
+    font: "600 10px var(--font-geist-mono)",
+    letterSpacing: 0.8,
+  };
 }
 
 function MemoryEditor({
