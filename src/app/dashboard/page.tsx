@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  appendRoutineSourcesToHistory,
+  routineContentForVoice,
+  routineSourcesForHistory,
+  type RoutineSourceLink,
+} from "@/lib/routines/voice-content";
 import TextChat from "./TextChat";
 import styles from "./dashboard.module.css";
 
@@ -103,6 +109,7 @@ export default function Dashboard() {
   const continuitySyncTimerRef = useRef<number | null>(null);
   const latestUserMessageIdRef = useRef<string | null>(null);
   const latestUserTranscriptRef = useRef("");
+  const pendingRoutineSourcesRef = useRef<RoutineSourceLink[]>([]);
   const connectionAttemptRef = useRef(0);
   const voiceSelectionTimeoutRef = useRef<number | null>(null);
 
@@ -464,12 +471,13 @@ export default function Dashboard() {
         });
         const result = await response.json();
         if (response.ok && result.handled && typeof result.content === "string") {
+          pendingRoutineSourcesRef.current = routineSourcesForHistory(result.sources);
           output = {
             success: true,
             handled: true,
             operation: result.operation ?? "execute",
             status: result.status ?? "completed",
-            content: result.content,
+            content: routineContentForVoice(result.content),
             askFeedback: result.askFeedback === true,
             feedbackPrompt: result.feedbackPrompt ?? null,
             instruction:
@@ -694,8 +702,13 @@ export default function Dashboard() {
           data.transcript?.trim() || assistantTranscriptRef.current.trim();
         if (finalTranscript) {
           setTranscript(finalTranscript);
+          const historyContent = appendRoutineSourcesToHistory(
+            finalTranscript,
+            pendingRoutineSourcesRef.current,
+          );
+          pendingRoutineSourcesRef.current = [];
           pendingAssistantTranscriptRef.current = {
-            content: finalTranscript,
+            content: historyContent,
             eventId: `assistant:${data.item_id ?? data.response_id ?? crypto.randomUUID()}`,
           };
         }
@@ -704,8 +717,13 @@ export default function Dashboard() {
 
       if (data.type === "response.output_text.done" && data.text?.trim()) {
         setTranscript(data.text.trim());
+        const historyContent = appendRoutineSourcesToHistory(
+          data.text.trim(),
+          pendingRoutineSourcesRef.current,
+        );
+        pendingRoutineSourcesRef.current = [];
         pendingAssistantTranscriptRef.current = {
-          content: data.text.trim(),
+          content: historyContent,
           eventId: `assistant:${data.item_id ?? data.response_id ?? crypto.randomUUID()}`,
         };
       }
@@ -781,6 +799,9 @@ export default function Dashboard() {
       if (!tokenResponse.ok || !tokenData.value) {
         throw new Error(tokenData.error ?? "Não foi possível iniciar a IA por voz.");
       }
+      pendingRoutineSourcesRef.current = routineSourcesForHistory(
+        tokenData.routineSources,
+      );
 
       const peer = new RTCPeerConnection();
       peerRef.current = peer;

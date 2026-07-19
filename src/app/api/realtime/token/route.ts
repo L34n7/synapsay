@@ -17,6 +17,7 @@ import { formatTasksForModel, loadOpenTasks, localDayRange } from "@/lib/tasks/c
 import { taskMoment } from "@/lib/tasks/types";
 import { profileBirthday, profileDisplayName } from "@/lib/user-display-name";
 import { prepareRoutineStartup } from "@/lib/routines/startup";
+import { routineSourcesForHistory } from "@/lib/routines/voice-content";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -181,6 +182,9 @@ export async function GET(request: Request) {
     };
   });
   const routineOpening = routineStartup.openingInstruction;
+  const routineSources = routineSourcesForHistory(
+    routineStartup.executions.flatMap((execution) => execution.sources ?? []),
+  );
   const startupBriefing = [continuityStartupBriefing, routineOpening]
     .filter(Boolean)
     .join("\n\n");
@@ -378,7 +382,7 @@ export async function GET(request: Request) {
     );
   }
   return NextResponse.json(
-    { ...data, startupBriefing },
+    { ...data, startupBriefing, routineSources },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
