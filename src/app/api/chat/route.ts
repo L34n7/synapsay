@@ -3,7 +3,11 @@ import { after, NextResponse } from "next/server";
 import { AI_MODELS } from "@/lib/ai/models";
 import { refreshContinuityCache } from "@/lib/continuity/cache";
 import { embedHistoryMessage } from "@/lib/history/embeddings";
-import { interpretHistoryIntent } from "@/lib/history/intent";
+import {
+  emptyHistoryIntent,
+  interpretHistoryIntent,
+  shouldCheckHistoryIntent,
+} from "@/lib/history/intent";
 import {
   formatHistoryForModel,
   searchConversationHistory,
@@ -274,7 +278,7 @@ export async function POST(request: Request) {
       .eq("conversation_id", conversationId)
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(60),
+      .limit(24),
     supabase
       .from("memories")
       .select("category, content, importance")
@@ -283,11 +287,11 @@ export async function POST(request: Request) {
       .eq("review_status", "approved")
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
       .order("importance", { ascending: false })
-      .limit(30),
+      .limit(12),
   ]);
 
   const input: Array<{ role: "user" | "assistant"; content: string }> = [];
-  let contextBudget = 80_000;
+  let contextBudget = 24_000;
   for (const message of recentMessages ?? []) {
     if (
       !message.content.trim() ||
@@ -296,7 +300,7 @@ export async function POST(request: Request) {
     ) {
       continue;
     }
-    const messageContent = message.content.slice(0, Math.min(20_000, contextBudget));
+    const messageContent = message.content.slice(0, Math.min(6_000, contextBudget));
     if (!messageContent) break;
     input.unshift({
       role: message.role === "assistant" ? "assistant" : "user",
@@ -328,15 +332,17 @@ export async function POST(request: Request) {
       ? lastSearchMessage.metadata.history_search
       : null;
 
-  const historyIntent = await interpretHistoryIntent({
-    userId,
-    currentMessage: content,
-    recentMessages: chronologicalMessages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    })),
-    lastSearch,
-  });
+  const historyIntent = shouldCheckHistoryIntent(content)
+    ? await interpretHistoryIntent({
+        userId,
+        currentMessage: content,
+        recentMessages: chronologicalMessages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+        lastSearch,
+      })
+    : emptyHistoryIntent();
 
   let historySearch: HistorySearchResult | null = null;
   if (historyIntent.shouldSearch) {
@@ -408,7 +414,7 @@ export async function POST(request: Request) {
       model: AI_MODELS.text,
       store: false,
       stream: true,
-      max_output_tokens: 3000,
+      max_output_tokens: 1200,
       instructions: [
         "Você é o assistente Synapsay. Responda sempre em português do Brasil com clareza, naturalidade e objetividade.",
         "Use parágrafos curtos e listas simples quando isso melhorar a leitura. Não invente fatos pessoais.",
