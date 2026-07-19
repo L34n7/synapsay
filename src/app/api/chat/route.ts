@@ -316,7 +316,7 @@ export async function POST(request: Request) {
   const memoryContext = (memories ?? [])
     .map(
       (memory) =>
-        `- [${memory.category}; importância ${memory.importance}/5] ${String(memory.content).slice(0, 500)}`,
+        `- [${memory.category}; importância ${memory.importance}/5] ${String(memory.content).slice(0, 350)}`,
     )
     .join("\n");
 
