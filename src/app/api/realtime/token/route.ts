@@ -84,7 +84,7 @@ export async function GET(request: Request) {
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
       .order("importance", { ascending: false })
       .order("updated_at", { ascending: false })
-      .limit(30),
+      .limit(12),
     loadContinuityCache(supabase, userId).catch((reason) => {
       console.warn("Falha ao carregar continuidade para a voz:", reason);
       return null;
@@ -97,13 +97,13 @@ export async function GET(request: Request) {
   const memoryContext = (memories ?? [])
     .map(
       (memory) =>
-        `- [${memory.category}; importância ${memory.importance}/5; ${memory.memory_type}] ${String(memory.content).slice(0, 500)}`,
+        `- [${memory.category}; importância ${memory.importance}/5; ${memory.memory_type}] ${String(memory.content).slice(0, 350)}`,
     )
     .join("\n");
 
   let openTasks: Awaited<ReturnType<typeof loadOpenTasks>> = [];
   try {
-    openTasks = await loadOpenTasks({ supabase, userId, limit: 80 });
+    openTasks = await loadOpenTasks({ supabase, userId, limit: 25 });
   } catch (reason) {
     console.warn("Falha ao carregar agenda para a voz:", reason);
   }
@@ -151,7 +151,7 @@ export async function GET(request: Request) {
       .eq("conversation_id", conversationId)
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(40);
+      .limit(12);
     conversationContext = (recentMessages ?? [])
       .reverse()
       .filter(
@@ -164,7 +164,7 @@ export async function GET(request: Request) {
           `${message.role === "user" ? "USUÁRIO" : "SYNAPSAY"}: ${String(message.content).slice(0, 1500)}`,
       )
       .join("\n")
-      .slice(-18_000);
+      .slice(-10_000);
   }
 
   const routineStartup = await prepareRoutineStartup({
@@ -188,7 +188,7 @@ export async function GET(request: Request) {
   const startupBriefing = [continuityStartupBriefing, routineOpening]
     .filter(Boolean)
     .join("\n\n");
-  const taskContext = formatTasksForModel(openTasks.slice(0, 40));
+  const taskContext = formatTasksForModel(openTasks.slice(0, 25));
 
   const instructions = [
     buildPersonalityInstructions(personality, "voice"),
