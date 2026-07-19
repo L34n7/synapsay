@@ -6,7 +6,7 @@ import { taskMoment, type TaskRecord } from "@/lib/tasks/types";
 
 const DEFAULT_TIME_ZONE = "America/Sao_Paulo";
 const WEEK_MS = 7 * 24 * 60 * 60_000;
-const MAX_TRANSCRIPT_MESSAGES = 220;
+const MAX_TRANSCRIPT_MESSAGES = 80;
 
 type MessageRow = {
   id: string;
@@ -385,10 +385,10 @@ function formatMessages(messages: MessageRow[]) {
           : message.role === "assistant"
             ? "SYNAPSAY"
             : "SISTEMA";
-      return `[${localDateTime(message.created_at)}] ${role}: ${message.content.trim().slice(0, 1600)}`;
+      return `[${localDateTime(message.created_at)}] ${role}: ${message.content.trim().slice(0, 900)}`;
     })
     .join("\n")
-    .slice(-42_000);
+    .slice(-12_000);
 }
 
 export async function loadContinuityCache(supabase: SupabaseClient, userId: string) {
@@ -583,6 +583,20 @@ export async function refreshContinuityCache({
   if (!apiKey) throw new Error("OPENAI_API_KEY não configurada.");
 
   const processingAt = new Date().toISOString();
+  const previous = await loadContinuityCache(supabase, userId).catch(() => null);
+  const previousUpdatedAt = previous?.updated_at
+    ? new Date(previous.updated_at).getTime()
+    : 0;
+  const refreshWindowActive =
+    previousUpdatedAt > 0 && Date.now() - previousUpdatedAt < 15 * 60_000;
+
+  if (
+    refreshWindowActive &&
+    (previous?.status === "processing" || previous?.status === "ready")
+  ) {
+    return { refreshed: false, skipped: "debounced" };
+  }
+
   await supabase.from("assistant_continuity").upsert(
     {
       user_id: userId,
@@ -594,15 +608,18 @@ export async function refreshContinuityCache({
   );
 
   try {
-    const since = new Date(Date.now() - WEEK_MS).toISOString();
-    const [{ data: messageRows }, { data: memories }, previous, openTasks] =
+    const since =
+      previous?.processed_until && !Number.isNaN(new Date(previous.processed_until).getTime())
+        ? previous.processed_until
+        : new Date(Date.now() - WEEK_MS).toISOString();
+    const [{ data: messageRows }, { data: memories }, openTasks] =
       await Promise.all([
         supabase
           .from("messages")
           .select("id, conversation_id, role, content, created_at")
           .eq("user_id", userId)
           .eq("generation_status", "completed")
-          .gte("created_at", since)
+          .gt("created_at", since)
           .order("created_at", { ascending: false })
           .limit(MAX_TRANSCRIPT_MESSAGES),
         supabase
@@ -614,7 +631,7 @@ export async function refreshContinuityCache({
           .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
           .order("importance", { ascending: false })
           .order("updated_at", { ascending: false })
-          .limit(80),
+          .limit(30),
         loadContinuityCache(supabase, userId).catch(() => null),
         loadOpenTasks({ supabase, userId, limit: 60 }).catch(() => []),
       ]);
@@ -627,7 +644,7 @@ export async function refreshContinuityCache({
           `${index + 1}. [${memory.category}; importância ${memory.importance}/5; ${memory.memory_type}] ${String(memory.content).slice(0, 500)}`,
       )
       .join("\n")
-      .slice(0, 18_000);
+      .slice(0, 7_000);
 
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -639,7 +656,7 @@ export async function refreshContinuityCache({
       body: JSON.stringify({
         model: AI_MODELS.memoryBrain,
         store: false,
-        max_output_tokens: 1800,
+        max_output_tokens: 900,
         instructions: [
           "Você é o cérebro de continuidade relacional da Synapsay.",
           "Crie um cache curto para a assistente de voz retomar a relação como se a conversa fosse contínua, sem inserir histórico bruto no prompt.",
@@ -660,7 +677,7 @@ export async function refreshContinuityCache({
               {
                 type: "input_text",
                 text: [
-                  `CACHE ANTERIOR:\n${previous ? formatJson(previous, 9000) : "Nenhum."}`,
+                  `CACHE ANTERIOR:\n${previous ? formatJson(previous, 4000) : "Nenhum."}`,
                   `MEMÓRIAS APROVADAS:\n${memoryContext || "Nenhuma."}`,
                   `AGENDA ATIVA:\n${formatTasksForModel(openTasks)}`,
                   `MENSAGENS DOS ÚLTIMOS 7 DIAS:\n${formatMessages(messages) || "Nenhuma."}`,
