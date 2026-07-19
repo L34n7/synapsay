@@ -89,15 +89,15 @@ function getOutputText(payload: ResponsesPayload) {
 }
 
 function trimTranscript(messages: ConversationMessage[]) {
-  const recent = messages.slice(-100);
+  const recent = messages.slice(-40);
   const transcript = recent
     .map((message) =>
       `${message.role === "user" ? "USUÁRIO" : message.role === "assistant" ? "ASSISTENTE" : "SISTEMA"}: ${message.content.trim()}`,
     )
     .join("\n");
 
-  return transcript.length > 32_000
-    ? transcript.slice(transcript.length - 32_000)
+  return transcript.length > 12_000
+    ? transcript.slice(transcript.length - 12_000)
     : transcript;
 }
 
@@ -183,12 +183,12 @@ export async function extractMemories({
     .eq("user_id", userId)
     .neq("status", "forgotten")
     .order("updated_at", { ascending: false })
-    .limit(150);
+    .limit(80);
 
   const existingContext = (existing ?? [])
     .map((memory, index) => `${index + 1}. [${memory.category}] ${memory.content}`)
     .join("\n")
-    .slice(0, 18_000);
+    .slice(0, 7_000);
 
   const model = AI_MODELS.memoryBrain;
   const safetyIdentifier = createHash("sha256").update(userId).digest("hex");
@@ -202,6 +202,7 @@ export async function extractMemories({
     body: JSON.stringify({
       model,
       store: false,
+      max_output_tokens: 900,
       instructions: [
         "Você é o extrator de memórias da Synapsay.",
         "Crie também um título curto e específico para a conversa, com 3 a 8 palavras, sem aspas e sem pontuação final.",
