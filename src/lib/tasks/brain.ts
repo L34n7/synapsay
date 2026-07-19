@@ -182,6 +182,31 @@ async function insertReminder({
   );
 }
 
+function emptyTaskBrainResult(): TaskBrainResult {
+  return {
+    intent: "none",
+    queryScope: "none",
+    needsClarification: false,
+    clarificationQuestion: "",
+    applied: [],
+    appliedTasks: [],
+    tasks: [],
+    relatedTasks: [],
+  };
+}
+
+export function shouldAnalyzeTaskMessage(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\\u0300-\\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!normalized) return false;
+  return /\\b(tarefa|tarefas|compromisso|compromissos|agenda|agendar|agendamento|lembrete|lembrar|avisa|avisar|notifica|notificar|reuniao|consulta|evento|prazo|vencimento|hoje|amanha|amanhã|ontem|cancelar|cancela|excluir|apagar|remover|concluir|conclui|finalizar|alterar|mudar|remarcar|reagendar|programar|planejar|planejamento|o que tenho|o que tem|pendencia|pendência|atrasad)/.test(
+    normalized,
+  );
+}
+
 export async function analyzeAndApplyTaskMessage({
   supabase,
   userId,
@@ -195,6 +220,8 @@ export async function analyzeAndApplyTaskMessage({
   sourceMessageId?: string | null;
   currentMessage: string;
 }): Promise<TaskBrainResult> {
+  if (!shouldAnalyzeTaskMessage(currentMessage)) return emptyTaskBrainResult();
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY não configurada.");
 
@@ -205,18 +232,18 @@ export async function analyzeAndApplyTaskMessage({
       .eq("conversation_id", conversationId)
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(18),
-    loadOpenTasks({ supabase, userId, limit: 100 }),
+      .limit(8),
+    loadOpenTasks({ supabase, userId, limit: 30 }),
   ]);
 
   const transcript = (recent ?? [])
     .reverse()
     .map(
       (message) =>
-        `${message.role === "user" ? "USUÁRIO" : "SYNAPSAY"}: ${String(message.content).slice(0, 1200)}`,
+        `${message.role === "user" ? "USUÁRIO" : "SYNAPSAY"}: ${String(message.content).slice(0, 800)}`,
     )
     .join("\n")
-    .slice(-18_000);
+    .slice(-8_000);
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -228,7 +255,7 @@ export async function analyzeAndApplyTaskMessage({
     body: JSON.stringify({
       model: AI_MODELS.memoryBrain,
       store: false,
-      max_output_tokens: 1200,
+      max_output_tokens: 700,
       instructions: [
         "Você é o cérebro de tarefas e lembretes da Synapsay. Analise a mensagem atual junto do contexto recente e das tarefas existentes.",
         "Use intent=query quando a pessoa perguntar o que tem para fazer, pedir a agenda ou consultar tarefas. Use intent=mutate para criar, alterar, concluir ou cancelar. Caso contrário use none.",
