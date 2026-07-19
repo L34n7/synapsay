@@ -632,8 +632,7 @@ export async function refreshContinuityCache({
           .order("importance", { ascending: false })
           .order("updated_at", { ascending: false })
           .limit(30),
-        loadContinuityCache(supabase, userId).catch(() => null),
-        loadOpenTasks({ supabase, userId, limit: 60 }).catch(() => []),
+        loadOpenTasks({ supabase, userId, limit: 30 }).catch(() => []),
       ]);
 
     const messages = ((messageRows ?? []) as MessageRow[]).reverse();
