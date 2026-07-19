@@ -10,6 +10,47 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 type StartupChannel = "voice" | "text";
 
+function routineStartKey(opportunity: RoutineOpportunity) {
+  return opportunity.routine.start_time?.slice(0, 5) ?? "00:00";
+}
+
+function latestAutomaticOpportunity(opportunities: RoutineOpportunity[]) {
+  return [...opportunities].sort((left, right) => {
+    const startComparison = routineStartKey(right).localeCompare(routineStartKey(left));
+    if (startComparison !== 0) return startComparison;
+    return right.routine.created_at.localeCompare(left.routine.created_at);
+  })[0];
+}
+
+async function markAsAwaitingConfirmation({
+  supabase,
+  userId,
+  opportunities,
+  now,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  opportunities: RoutineOpportunity[];
+  now: Date;
+}) {
+  const results = await Promise.all(
+    opportunities.map((opportunity) =>
+      supabase
+        .from("assistant_routine_runs")
+        .update({
+          status: "awaiting_confirmation",
+          offered_at: now.toISOString(),
+          confirmed_at: null,
+        })
+        .eq("routine_id", opportunity.routine.id)
+        .eq("reference_key", opportunity.referenceKey)
+        .eq("user_id", userId),
+    ),
+  );
+  const error = results.find((result) => result.error)?.error;
+  if (error) throw error;
+}
+
 function automaticInstruction({
   opportunity,
   execution,
@@ -68,12 +109,35 @@ export async function prepareRoutineStartup({
     conversationId,
     now,
   });
-  const confirmationInstruction = formatRoutineOpening(opportunities);
+  const automaticOpportunities = opportunities.filter(
+    (opportunity) => !opportunity.requiresConfirmation,
+  );
+  const automaticToExecute =
+    automaticOpportunities.length > 1
+      ? latestAutomaticOpportunity(automaticOpportunities)
+      : automaticOpportunities[0];
+  const deferredAutomaticOpportunities = automaticOpportunities
+    .filter((opportunity) => opportunity !== automaticToExecute)
+    .map((opportunity) => ({ ...opportunity, requiresConfirmation: true }));
+
+  if (deferredAutomaticOpportunities.length) {
+    await markAsAwaitingConfirmation({
+      supabase,
+      userId,
+      opportunities: deferredAutomaticOpportunities,
+      now,
+    });
+  }
+
+  const confirmationInstruction = formatRoutineOpening([
+    ...opportunities.filter((opportunity) => opportunity.requiresConfirmation),
+    ...deferredAutomaticOpportunities,
+  ]);
   const automaticInstructions: string[] = [];
   const executions: Array<Record<string, unknown>> = [];
 
   for (const opportunity of opportunities) {
-    if (opportunity.requiresConfirmation) continue;
+    if (opportunity.requiresConfirmation || opportunity !== automaticToExecute) continue;
     try {
       const execution = await executeRoutine({
         supabase,
