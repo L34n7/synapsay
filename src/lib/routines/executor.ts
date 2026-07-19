@@ -127,7 +127,9 @@ function extractSources(data: unknown) {
       });
     }
   }
-  return [...unique.values()];
+  // As citações efetivamente usadas entram primeiro. Limitar a lista evita
+  // gravar e reenviar ao Realtime dezenas de resultados auxiliares da busca.
+  return [...unique.values()].slice(0, 12);
 }
 
 function webSearchTools(routine: AssistantRoutine) {
@@ -402,7 +404,7 @@ export async function resolvePendingRoutine({
 }) {
   const normalized = normalize(message);
   const affirmative =
-    /^(sim|pode|claro|quero|execute|executa|fale|manda|vamos|ok|okay|confirmo)\b/.test(
+    /^(sim|pode|claro|quero|eu quero|execute|executa|fale|manda|vamos|ok|okay|confirmo|traga|rode)\b/.test(
       normalized,
     );
   const decline = /^(nao|agora nao|hoje nao|deixa pra la|dispenso|pular|pule)\b/.test(

@@ -456,20 +456,40 @@ export default function Dashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message,
+            latestUserMessage: latestUserTranscriptRef.current,
             source: "voice",
             conversationId: currentConversationId,
             sourceMessageId: latestUserMessageIdRef.current,
           }),
         });
         const result = await response.json();
-        output = response.ok && result.handled
-          ? {
-              success: true,
-              ...result,
-              instruction:
-                "Apresente integralmente o resumo retornado. Se houver feedbackPrompt, faça essa pergunta somente depois do conteúdo.",
-            }
-          : { success: false, ...result, error: result.error ?? "A rotina não foi salva. Peça os dados ausentes sem afirmar que concluiu." };
+        if (response.ok && result.handled && typeof result.content === "string") {
+          output = {
+            success: true,
+            handled: true,
+            operation: result.operation ?? "execute",
+            status: result.status ?? "completed",
+            content: result.content,
+            askFeedback: result.askFeedback === true,
+            feedbackPrompt: result.feedbackPrompt ?? null,
+            instruction:
+              "Leia agora integralmente o campo content em voz alta. Não resuma, não peça informações adicionais e não pronuncie URLs ou marcações de citação. O conteúdo já foi gerado e a rotina já foi concluída. Se houver feedbackPrompt, faça essa pergunta somente depois do conteúdo.",
+          };
+        } else {
+          output = response.ok && result.handled
+            ? {
+                success: true,
+                ...result,
+                instruction: "Apresente integralmente o resumo retornado.",
+              }
+            : {
+                success: false,
+                ...result,
+                error:
+                  result.error ??
+                  "A rotina não foi salva. Peça os dados ausentes sem afirmar que concluiu.",
+              };
+        }
       } catch {
         output = { success: false, error: "Não foi possível salvar a rotina agora." };
       }
