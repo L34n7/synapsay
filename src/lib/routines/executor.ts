@@ -1,5 +1,9 @@
 import { AI_MODELS } from "@/lib/ai/models";
 import { responseDiagnostic, responseOutputText } from "@/lib/ai/responses";
+import {
+  routineSourcesForHistory,
+  routineSourcesFromContent,
+} from "@/lib/routines/voice-content";
 import type { AssistantRoutine, NewsSource } from "@/lib/routines/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -226,10 +230,18 @@ export async function executeRoutine({
   const isTest = run.is_test === true || referenceKey.startsWith("test:");
   const cacheIsValid =
     cached && (!cached.expires_at || new Date(cached.expires_at).getTime() > Date.now());
-  if (cacheIsValid && !executionInstruction) {
+  const cachedSources = cached
+    ? routineSourcesForHistory([
+        ...(Array.isArray(cached.sources) ? cached.sources : []),
+        ...routineSourcesFromContent(cached.content_text ?? ""),
+      ])
+    : [];
+  const cacheHasRequiredSources =
+    routine.action_type !== "news_briefing" || cachedSources.length > 0;
+  if (cacheIsValid && cacheHasRequiredSources && !executionInstruction) {
     return {
       content: cached.content_text,
-      sources: cached.sources ?? [],
+      sources: cachedSources,
       cached: true,
       askFeedback: false,
       routineId,
@@ -296,7 +308,10 @@ export async function executeRoutine({
           : "A geração terminou sem texto utilizável. Tente novamente.",
       );
     }
-    const sources = extractSources(data);
+    const sources = routineSourcesForHistory([
+      ...extractSources(data),
+      ...routineSourcesFromContent(content),
+    ]);
 
     if (!isTest && !executionInstruction) {
       const { error: cacheError } = await supabase

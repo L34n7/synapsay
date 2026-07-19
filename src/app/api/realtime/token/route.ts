@@ -34,7 +34,40 @@ function validTimeZone(timeZone: string) {
   }
 }
 
+function localVoiceMoment(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    timeZone,
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const hour = Number(value("hour"));
+  const greeting = hour >= 5 && hour < 12
+    ? "bom dia"
+    : hour >= 12 && hour < 18
+      ? "boa tarde"
+      : "boa noite";
+  const period = hour >= 5 && hour < 12
+    ? "manhã"
+    : hour >= 12 && hour < 18
+      ? "tarde"
+      : "noite";
+
+  return {
+    greeting,
+    period,
+    label: `${value("weekday")}, ${value("day")}/${value("month")}/${value("year")} às ${value("hour")}:${value("minute")}`,
+  };
+}
+
 export async function GET(request: Request) {
+  const requestNow = new Date();
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getClaims();
   const userId = authData?.claims?.sub ? String(authData.claims.sub) : null;
@@ -73,6 +106,7 @@ export async function GET(request: Request) {
       ? profile.timezone.trim()
       : "America/Sao_Paulo",
   );
+  const localMoment = localVoiceMoment(requestNow, timeZone);
 
   const [{ data: memories, error: memoriesError }, continuity] = await Promise.all([
     supabase
@@ -172,6 +206,7 @@ export async function GET(request: Request) {
     userId,
     conversationId,
     channel: "voice",
+    now: requestNow,
   }).catch((reason) => {
     console.warn("Falha ao avaliar rotinas na abertura da voz:", reason);
     return {
@@ -185,9 +220,17 @@ export async function GET(request: Request) {
   const routineSources = routineSourcesForHistory(
     routineStartup.executions.flatMap((execution) => execution.sources ?? []),
   );
-  const startupBriefing = [continuityStartupBriefing, routineOpening]
+  const localTimeInstruction = [
+    `Horário local do usuário (${timeZone}): ${localMoment.label}.`,
+    `Período correto agora: ${localMoment.period}.`,
+    `Se cumprimentar nesta resposta, use "${localMoment.greeting}". Não use outra saudação de período do dia.`,
+  ].join(" ");
+  const startupContent = [continuityStartupBriefing, routineOpening]
     .filter(Boolean)
     .join("\n\n");
+  const startupBriefing = startupContent
+    ? [localTimeInstruction, startupContent].join("\n\n")
+    : "";
   const taskContext = formatTasksForModel(openTasks.slice(0, 25));
 
   const instructions = [
@@ -222,7 +265,7 @@ export async function GET(request: Request) {
       "A ferramenta search_conversation_history consulta o histórico salvo por palavras e significado.",
       "Use-a quando o usuário pedir algo dito anteriormente e a evidência não estiver no contexto ao vivo.",
       "Diferencie rigorosamente falas do USUÁRIO e da SYNAPSAY. Nunca invente uma lembrança.",
-      `Data atual: ${new Date().toISOString()}; fuso: ${timeZone}.`,
+      `Data atual UTC: ${requestNow.toISOString()}; fuso do usuário: ${timeZone}; horário local: ${localMoment.label}; saudação correta agora: "${localMoment.greeting}".`,
     ].join(" "),
     [
       "manage_tasks gerencia somente tarefas, compromissos e lembretes da agenda.",
