@@ -43,6 +43,26 @@ export function routineSourcesForHistory(sources: unknown) {
   return [...unique.values()].slice(0, 12);
 }
 
+export function routineSourcesFromContent(content: string) {
+  const sources: RoutineSourceLink[] = [];
+  const markdownLinkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi;
+  for (const match of content.matchAll(markdownLinkPattern)) {
+    sources.push({ title: match[1], url: match[2] });
+  }
+
+  const rawUrlPattern = /https?:\/\/[^\s<>)\]]+/gi;
+  for (const match of content.matchAll(rawUrlPattern)) {
+    const url = match[0];
+    let title = url;
+    try {
+      title = new URL(url).hostname.replace(/^www\./, "");
+    } catch {}
+    sources.push({ title, url });
+  }
+
+  return routineSourcesForHistory(sources);
+}
+
 export function appendRoutineSourcesToHistory(
   content: string,
   sources: RoutineSourceLink[],
