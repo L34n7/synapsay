@@ -198,11 +198,11 @@ function emptyTaskBrainResult(): TaskBrainResult {
 export function shouldAnalyzeTaskMessage(value: string) {
   const normalized = value
     .normalize("NFD")
-    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
   if (!normalized) return false;
-  return /\\b(tarefa|tarefas|compromisso|compromissos|agenda|agendar|agendamento|lembrete|lembrar|avisa|avisar|notifica|notificar|reuniao|consulta|evento|prazo|vencimento|hoje|amanha|amanhã|ontem|cancelar|cancela|excluir|apagar|remover|concluir|conclui|finalizar|alterar|mudar|remarcar|reagendar|programar|planejar|planejamento|o que tenho|o que tem|pendencia|pendência|atrasad)/.test(
+  return /\b(tarefa|tarefas|compromisso|compromissos|agenda|agendar|agendamento|lembrete|lembrar|avisa|avisar|notifica|notificar|reuniao|consulta|evento|prazo|vencimento|hoje|amanha|amanhã|ontem|cancelar|cancela|excluir|apagar|remover|concluir|conclui|finalizar|alterar|mudar|remarcar|reagendar|programar|planejar|planejamento|o que tenho|o que tem|pendencia|pendência|atrasad)\b/.test(
     normalized,
   );
 }
