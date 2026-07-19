@@ -98,14 +98,16 @@ export async function interpretHistoryIntent({
   recentMessages: Array<{ role: string; content: string }>;
   lastSearch?: unknown;
 }): Promise<HistoryIntent> {
+  const fallback: HistoryIntent = emptyHistoryIntent();
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return fallback;
 
   const context = recentMessages
-    .slice(-12)
+    .slice(-6)
     .map(
       (message) =>
-        `${message.role === "assistant" ? "SYNAPSAY" : "USUÁRIO"}: ${message.content.slice(0, 1200)}`,
+        `${message.role === "assistant" ? "SYNAPSAY" : "USUÁRIO"}: ${message.content.slice(0, 600)}`,
     )
     .join("\n");
 
@@ -121,7 +123,7 @@ export async function interpretHistoryIntent({
     body: JSON.stringify({
       model: AI_MODELS.memoryBrain,
       store: false,
-      max_output_tokens: 300,
+      max_output_tokens: 180,
       instructions: [
         "Você decide se a mensagem atual precisa consultar conversas antigas do mesmo usuário.",
         "Ative should_search quando o usuário perguntar se algo já foi dito, pedir para lembrar um acontecimento anterior, mencionar 'outro dia', 'eu falei', 'lembra disso', pedir para recuperar/ler/comentar um trecho antigo ou solicitar mais mensagens antes/depois de um resultado anterior.",
