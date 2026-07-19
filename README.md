@@ -13,8 +13,8 @@ OPENAI_API_KEY=
 # Opcional. Modelos padrão da Synapsay.
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
 OPENAI_TEXT_MODEL=gpt-5.6-luna
-OPENAI_MEMORY_MODEL=gpt-5.6-luna
-OPENAI_MEMORY_CONFLICT_MODEL=gpt-5.6-luna
+OPENAI_MEMORY_MODEL=gpt-5.4-nano
+OPENAI_MEMORY_CONFLICT_MODEL=gpt-5.4-nano
 
 # Backend privado. Copie em Supabase > Project Settings > API Keys.
 # Nunca use NEXT_PUBLIC_ neste nome.
