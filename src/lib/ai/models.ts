@@ -15,14 +15,22 @@ function configuredModel(variable: string | undefined, fallback: string) {
   return value;
 }
 
+function configuredMemoryModel(variable: string | undefined, fallback: string) {
+  const value = variable?.trim();
+  // Migra automaticamente a configuração anterior, que usava Luna
+  // para classificadores e rotinas de segundo plano.
+  if (!value || value === "gpt-5.6-luna") return fallback;
+  return configuredModel(value, fallback);
+}
+
 export const AI_MODELS = {
   voice: configuredModel(process.env.OPENAI_REALTIME_MODEL, "gpt-realtime-mini"),
   text: configuredModel(process.env.OPENAI_TEXT_MODEL, "gpt-5.6-luna"),
-  memoryBrain: configuredModel(
+  memoryBrain: configuredMemoryModel(
     process.env.OPENAI_MEMORY_MODEL,
     "gpt-5.4-nano",
   ),
-  memoryConflict: configuredModel(
+  memoryConflict: configuredMemoryModel(
     process.env.OPENAI_MEMORY_CONFLICT_MODEL,
     "gpt-5.4-nano",
   ),
