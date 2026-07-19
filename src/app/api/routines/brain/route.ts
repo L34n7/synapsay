@@ -39,6 +39,10 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const message = typeof body?.message === "string" ? body.message.trim() : "";
+  const latestUserMessage =
+    typeof body?.latestUserMessage === "string"
+      ? body.latestUserMessage.trim()
+      : "";
   const source = body?.source === "voice" ? "voice" : "text";
   const sourceMessageId =
     typeof body?.sourceMessageId === "string" ? body.sourceMessageId.trim() : null;
@@ -73,7 +77,14 @@ export async function POST(request: Request) {
       });
     }
 
-    const pending = await resolvePendingRoutine({ supabase, userId, message });
+    // Na voz, `message` pode ser uma reconstrução feita pelo modelo contendo
+    // todo o pedido original. A fala bruta mais recente é a fonte correta para
+    // decidir se o usuário confirmou, adiou ou recusou a oportunidade pendente.
+    const pending = await resolvePendingRoutine({
+      supabase,
+      userId,
+      message: latestUserMessage || message,
+    });
     if (pending?.handled) return NextResponse.json(pending);
 
     const suggestion = await resolvePendingRoutineSuggestion({

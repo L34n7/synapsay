@@ -227,6 +227,7 @@ export async function GET(request: Request) {
       "Envie em message o pedido completo, reunindo detalhes relevantes das falas imediatamente anteriores: horário, recorrência, assunto, fontes e confirmação.",
       "Rotinas automáticas da abertura já são executadas pelo servidor. Quando o conteúdo vier em <conteudo_rotina>, apresente-o e não chame ferramenta novamente.",
       "Para confirmar ou recusar rotina pendente, chame manage_routines mesmo que a resposta seja apenas sim, agora não ou não quero mais.",
+      "Ao confirmar, adiar ou recusar uma rotina que acabou de ser oferecida, envie em message exatamente a fala atual do usuário. Não reconstrua a configuração anterior e não trate a confirmação como pedido para criar outra rotina.",
       "É proibido afirmar que uma rotina foi criada, configurada, alterada ou excluída sem receber success=true. Em caso de erro, informe que não foi salva.",
       "Nunca diga que não existe ferramenta para rotinas: manage_routines está disponível.",
       "Um interesse recorrente pode gerar sugestão, mas nunca cria rotina sem autorização explícita.",
@@ -349,7 +350,7 @@ export async function GET(request: Request) {
                 properties: {
                   message: {
                     type: "string",
-                    description: "Pedido completo, incluindo detalhes relevantes das falas anteriores.",
+                    description: "Para criar ou editar, envie o pedido completo. Para confirmar, adiar ou recusar uma rotina oferecida, envie somente a fala atual do usuário, sem reconstruir o pedido anterior.",
                   },
                 },
               },
