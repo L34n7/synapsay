@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   analyzeAndApplyTaskMessage,
   formatTaskBrainResult,
+  shouldAnalyzeTaskMessage,
   type TaskBrainResult,
 } from "@/lib/tasks/brain";
 import { syncGoogleCalendarForUser, syncTaskToGoogle } from "@/lib/google-calendar/sync";
@@ -177,20 +178,22 @@ export async function POST(request: Request) {
         if (!expected) console.warn("Google Agenda não sincronizada antes da resposta:", reason);
       });
     }
-    taskBrainResult = await analyzeAndApplyTaskMessage({
-      supabase,
-      userId,
-      conversationId,
-      sourceMessageId: userMessageId,
-      currentMessage: content,
-    });
-    if (
-      (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) &&
-      taskBrainResult.applied.length
-    ) {
-      await Promise.allSettled(
-        taskBrainResult.applied.map((item) => syncTaskToGoogle(userId, item.taskId)),
-      );
+    if (shouldAnalyzeTaskMessage(content)) {
+      taskBrainResult = await analyzeAndApplyTaskMessage({
+        supabase,
+        userId,
+        conversationId,
+        sourceMessageId: userMessageId,
+        currentMessage: content,
+      });
+      if (
+        (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+        taskBrainResult.applied.length
+      ) {
+        await Promise.allSettled(
+          taskBrainResult.applied.map((item) => syncTaskToGoogle(userId, item.taskId)),
+        );
+      }
     }
   } catch (reason) {
     console.warn("Agenda automática indisponível nesta mensagem:", reason);
