@@ -202,7 +202,10 @@ export function shouldAnalyzeTaskMessage(value: string) {
     .toLowerCase()
     .trim();
   if (!normalized) return false;
-  return /\b(tarefa|tarefas|compromisso|compromissos|agenda|agendar|agendamento|lembrete|lembrar|avisa|avisar|notifica|notificar|reuniao|consulta|evento|prazo|vencimento|hoje|amanha|amanhã|ontem|cancelar|cancela|excluir|apagar|remover|concluir|conclui|finalizar|alterar|mudar|remarcar|reagendar|programar|planejar|planejamento|o que tenho|o que tem|pendencia|pendência|atrasad)\b/.test(
+  if (/^(sim|nao|não|pode|quero|confirmo|ok|isso|certo)\b/.test(normalized)) {
+    return true;
+  }
+  return /\b(tarefa|tarefas|compromisso|compromissos|agenda|agendar|agendamento|lembrete|lembrar|lembra|avisa|avisar|notifica|notificar|reuniao|consulta|evento|prazo|vencimento|hoje|amanha|ontem|cancelar|cancela|excluir|apagar|remover|concluir|conclui|finalizar|alterar|mudar|remarcar|reagendar|programar|planejar|planejamento|o que tenho|o que tem|pendencia|atrasad)\b/.test(
     normalized,
   );
 }
