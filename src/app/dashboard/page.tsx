@@ -446,18 +446,29 @@ export default function Dashboard() {
         message = args.message?.trim() || message;
       } catch {}
 
-      setTranscript("Certo, estou salvando sua rotina.");
+      setTranscript("Certo, estou cuidando da sua rotina.");
       let output: unknown;
       try {
         await Promise.allSettled([...pendingSavesRef.current]);
+        const currentConversationId = await ensureConversation();
         const response = await fetch("/api/routines/brain", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message, source: "voice" }),
+          body: JSON.stringify({
+            message,
+            source: "voice",
+            conversationId: currentConversationId,
+            sourceMessageId: latestUserMessageIdRef.current,
+          }),
         });
         const result = await response.json();
         output = response.ok && result.handled
-          ? { success: true, ...result, instruction: "Confirme somente o resumo retornado." }
+          ? {
+              success: true,
+              ...result,
+              instruction:
+                "Apresente integralmente o resumo retornado. Se houver feedbackPrompt, faça essa pergunta somente depois do conteúdo.",
+            }
           : { success: false, ...result, error: result.error ?? "A rotina não foi salva. Peça os dados ausentes sem afirmar que concluiu." };
       } catch {
         output = { success: false, error: "Não foi possível salvar a rotina agora." };
@@ -469,7 +480,7 @@ export default function Dashboard() {
       }));
       return true;
     },
-    [],
+    [ensureConversation],
   );
 
   const applyRealtimeVoice = useCallback((voice: string) => {

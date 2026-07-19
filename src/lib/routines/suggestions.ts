@@ -1,8 +1,10 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 function normalize(message: string) {
   return message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
-export async function resolvePendingRoutineSuggestion({ supabase, userId, message, timezone = "America/Sao_Paulo" }: { supabase: any; userId: string; message: string; timezone?: string }) {
+export async function resolvePendingRoutineSuggestion({ supabase, userId, message, timezone = "America/Sao_Paulo" }: { supabase: SupabaseClient; userId: string; message: string; timezone?: string }) {
   const normalized = normalize(message);
   const affirmative = /^(sim|pode|claro|quero|vamos|ok|okay|confirmo)\b/.test(normalized);
   const decline = /^(nao|agora nao|deixa pra la|dispenso)\b/.test(normalized);

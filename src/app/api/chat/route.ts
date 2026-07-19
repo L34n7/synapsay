@@ -16,6 +16,7 @@ import {
   type TaskBrainResult,
 } from "@/lib/tasks/brain";
 import { syncGoogleCalendarForUser, syncTaskToGoogle } from "@/lib/google-calendar/sync";
+import { prepareRoutineStartup } from "@/lib/routines/startup";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -190,6 +191,16 @@ export async function POST(request: Request) {
   } catch (reason) {
     console.warn("Agenda automática indisponível nesta mensagem:", reason);
   }
+
+  const routineStartup = await prepareRoutineStartup({
+    supabase,
+    userId,
+    conversationId,
+    channel: "text",
+  }).catch((reason) => {
+    console.warn("Rotinas indisponíveis na abertura do chat textual:", reason);
+    return { openingInstruction: "" };
+  });
 
   let assistantMessageId = existingAssistant?.id ?? null;
   if (assistantMessageId) {
@@ -406,6 +417,9 @@ export async function POST(request: Request) {
           : "Não há memórias aprovadas; não presuma informações pessoais.",
         historyContext ||
           "Nenhuma busca global foi necessária. Responda usando apenas a conversa atual e as memórias aprovadas.",
+        routineStartup.openingInstruction
+          ? `Antes do restante da resposta, cumpra estas instruções de rotinas. Conteúdo já executado no servidor não deve chamar ferramenta novamente.\n<rotinas_abertura>\n${routineStartup.openingInstruction}\n</rotinas_abertura>`
+          : "Não há rotina disponível nesta abertura.",
         taskBrainResult
           ? formatTaskBrainResult(taskBrainResult)
           : "A agenda não pôde ser consultada nesta mensagem. Não confirme criação, alteração ou lembrete sem uma operação registrada.",

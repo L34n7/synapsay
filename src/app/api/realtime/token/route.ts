@@ -16,13 +16,10 @@ import { createClient } from "@/lib/supabase/server";
 import { formatTasksForModel, loadOpenTasks, localDayRange } from "@/lib/tasks/context";
 import { taskMoment } from "@/lib/tasks/types";
 import { profileBirthday, profileDisplayName } from "@/lib/user-display-name";
-import {
-  claimRoutineOpportunities,
-  findRoutineSuggestion,
-  formatRoutineOpening,
-} from "@/lib/routines/engine";
+import { prepareRoutineStartup } from "@/lib/routines/startup";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -169,23 +166,21 @@ export async function GET(request: Request) {
       .slice(-18_000);
   }
 
-  const [routineOpportunities, routineSuggestion] = await Promise.all([
-    claimRoutineOpportunities({
-      supabase,
-      userId,
-      conversationId,
-    }).catch((reason) => {
-      console.warn("Falha ao avaliar rotinas na abertura da voz:", reason);
-      return [];
-    }),
-    findRoutineSuggestion(supabase, userId).catch(() => null),
-  ]);
-  const routineOpening = [
-    formatRoutineOpening(routineOpportunities),
-    routineSuggestion,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const routineStartup = await prepareRoutineStartup({
+    supabase,
+    userId,
+    conversationId,
+    channel: "voice",
+  }).catch((reason) => {
+    console.warn("Falha ao avaliar rotinas na abertura da voz:", reason);
+    return {
+      opportunities: [],
+      executions: [],
+      suggestion: null,
+      openingInstruction: "",
+    };
+  });
+  const routineOpening = routineStartup.openingInstruction;
   const startupBriefing = [continuityStartupBriefing, routineOpening]
     .filter(Boolean)
     .join("\n\n");
@@ -211,7 +206,7 @@ export async function GET(request: Request) {
       : "Esta é uma nova conversa.",
     `Agenda estruturada atual.\n<agenda_ativa>\n${taskContext}\n</agenda_ativa>`,
     routineOpening
-      ? `Rotinas disponíveis ou sugestão contextual nesta abertura. Siga rigorosamente as instruções e use manage_tasks como ferramenta unificada.\n<rotinas_abertura>\n${routineOpening}\n</rotinas_abertura>`
+      ? `Rotinas disponíveis, já executadas ou sugestão contextual nesta abertura. Siga rigorosamente as instruções. Conteúdo já executado no servidor deve ser apresentado sem chamar ferramenta novamente.\n<rotinas_abertura>\n${routineOpening}\n</rotinas_abertura>`
       : "Não há rotina disponível nesta abertura.",
     [
       "A ferramenta configure_assistant_personality lista, demonstra e salva voz, nome preferido ou aniversário.",
@@ -230,7 +225,7 @@ export async function GET(request: Request) {
       "manage_routines gerencia exclusivamente rotinas recorrentes do assistente.",
       "Para qualquer pedido de criar, agendar, programar, automatizar, alterar, pausar, excluir, confirmar ou executar uma rotina, você DEVE chamar manage_routines antes de responder.",
       "Envie em message o pedido completo, reunindo detalhes relevantes das falas imediatamente anteriores: horário, recorrência, assunto, fontes e confirmação.",
-      "Para executar rotina automática da abertura, chame manage_routines com o comando técnico exato contendo EXECUTAR_ROTINA, routineId e referenceKey.",
+      "Rotinas automáticas da abertura já são executadas pelo servidor. Quando o conteúdo vier em <conteudo_rotina>, apresente-o e não chame ferramenta novamente.",
       "Para confirmar ou recusar rotina pendente, chame manage_routines mesmo que a resposta seja apenas sim, agora não ou não quero mais.",
       "É proibido afirmar que uma rotina foi criada, configurada, alterada ou excluída sem receber success=true. Em caso de erro, informe que não foi salva.",
       "Nunca diga que não existe ferramenta para rotinas: manage_routines está disponível.",

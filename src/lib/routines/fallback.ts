@@ -1,4 +1,6 @@
-type SupabaseLike = { from: (table: string) => any };
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type SupabaseLike = SupabaseClient;
 
 type FallbackRoutineResult = {
   handled: true;
@@ -136,7 +138,7 @@ export async function tryCreateNewsRoutineFallback({
   if (existingError) throw existingError;
 
   const existing = (existingRows ?? []).find(
-    (routine: any) => String(routine.start_time ?? "").slice(0, 5) === startTime,
+    (routine) => String(routine.start_time ?? "").slice(0, 5) === startTime,
   );
   if (existing) {
     return {
