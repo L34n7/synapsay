@@ -20,11 +20,11 @@ export const AI_MODELS = {
   text: configuredModel(process.env.OPENAI_TEXT_MODEL, "gpt-5.6-luna"),
   memoryBrain: configuredModel(
     process.env.OPENAI_MEMORY_MODEL,
-    "gpt-5.6-luna",
+    "gpt-5.4-nano",
   ),
   memoryConflict: configuredModel(
     process.env.OPENAI_MEMORY_CONFLICT_MODEL,
-    "gpt-5.6-luna",
+    "gpt-5.4-nano",
   ),
   embedding: configuredModel(
     process.env.OPENAI_EMBEDDING_MODEL,
