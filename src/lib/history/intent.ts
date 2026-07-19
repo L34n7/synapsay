@@ -75,7 +75,8 @@ export async function interpretHistoryIntent({
   recentMessages: Array<{ role: string; content: string }>;
   lastSearch?: unknown;
 }): Promise<HistoryIntent> {
-  const fallback: HistoryIntent = {
+export function emptyHistoryIntent(): HistoryIntent {
+  return {
     shouldSearch: false,
     query: "",
     direction: "around",
@@ -85,6 +86,19 @@ export async function interpretHistoryIntent({
     from: null,
     to: null,
   };
+}
+
+export function shouldCheckHistoryIntent(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\\u0300-\\u036f]/g, "")
+    .toLowerCase();
+  return /\\b(lembra|recorda|eu falei|eu disse|ja disse|ja falei|conversa antiga|conversa anterior|outro dia|antes|historico|histórico|trecho|mensagem antiga|recupera|recuperar|buscar|procura|quando eu|o que eu tinha|qual era)\\b/.test(
+    normalized,
+  );
+}
+
+const fallback: HistoryIntent = emptyHistoryIntent();
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return fallback;
