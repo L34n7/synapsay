@@ -3,9 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import {
   analyzeAndApplyTaskMessage,
   formatTaskBrainToolResult,
+  type TaskBrainResult,
 } from "@/lib/tasks/brain";
 import { syncTaskToGoogle } from "@/lib/google-calendar/sync";
-import { analyzeAndApplyRoutineMessage } from "@/lib/routines/brain";
+import {
+  analyzeAndApplyRoutineMessage,
+  isAmbiguousRoutineAgendaRequest,
+} from "@/lib/routines/brain";
 import { buildRoutineConversationContext } from "@/lib/routines/context";
 import { executeRoutine, resolvePendingRoutine } from "@/lib/routines/executor";
 import { resolvePendingRoutineSuggestion } from "@/lib/routines/suggestions";
@@ -20,6 +24,72 @@ function executionMarker(message: string) {
   const routineId = message.match(/routineId=([0-9a-f-]{36})/i)?.[1] ?? null;
   const referenceKey = message.match(/referenceKey=([^\s;]+)/i)?.[1] ?? null;
   return routineId && referenceKey ? { routineId, referenceKey } : null;
+}
+
+function extractUserRoutineText(analysisMessage: string) {
+  const lines = analysisMessage.split("\n");
+  const userLines = lines
+    .filter(
+      (line) => /^\d+\.\s/.test(line) || line.startsWith("PEDIDO ATUAL:"),
+    )
+    .map((line) =>
+      line
+        .replace(/^\d+\.\s*/, "")
+        .replace(/^PEDIDO ATUAL:\s*/, "")
+        .trim(),
+    )
+    .filter(Boolean);
+  return userLines.length ? userLines.join("\n") : analysisMessage;
+}
+
+function normalizeIntentText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function hasExplicitAgendaIntent(value: string) {
+  return /\b(agenda|calendario|google agenda|google calendar|compromisso|evento|lembrete|tarefa|reuniao|consulta|culto|ensaio)\b/.test(
+    normalizeIntentText(value),
+  );
+}
+
+function hasExplicitRoutineIntent(value: string) {
+  return /\b(rotina|briefing|primeira conversa|ao iniciar|noticias|resumo)\b|quando eu (?:iniciar|abrir|falar|conversar)|execut(?:e|ar) automaticamente/.test(
+    normalizeIntentText(value),
+  );
+}
+
+function shouldTryAgendaFirst(value: string) {
+  return hasExplicitAgendaIntent(value) && !hasExplicitRoutineIntent(value);
+}
+
+function taskResultHandled(result: TaskBrainResult) {
+  return (
+    result.intent !== "none" ||
+    result.needsClarification ||
+    result.applied.length > 0 ||
+    result.tasks.length > 0 ||
+    result.relatedTasks.length > 0
+  );
+}
+
+function ambiguousKindResult() {
+  return {
+    success: true,
+    intent: "none",
+    needsClarification: true,
+    clarificationQuestion:
+      "Só para confirmar: você quer que eu crie uma rotina do assistente ou uma agenda no calendário?",
+    operations: [],
+    agenda: [],
+    relatedAgenda: [],
+    responseRules: [
+      "Faça exatamente a pergunta de confirmação antes de criar qualquer coisa.",
+      "Explique em uma frase curta: rotina executa uma ação do assistente; agenda cria um compromisso no calendário.",
+    ],
+  };
 }
 
 export async function POST(request: Request) {
@@ -91,6 +161,53 @@ export async function POST(request: Request) {
       .maybeSingle();
     const timezone = profile?.timezone || "America/Sao_Paulo";
 
+    const analysisMessage = await buildRoutineConversationContext({
+      supabase,
+      userId,
+      conversationId,
+      currentMessage: message,
+      sourceMessageId,
+    });
+    const userRoutineText = extractUserRoutineText(analysisMessage);
+
+    if (isAmbiguousRoutineAgendaRequest(userRoutineText)) {
+      return NextResponse.json(ambiguousKindResult());
+    }
+
+    const agendaFirst =
+      shouldTryAgendaFirst(message) || shouldTryAgendaFirst(analysisMessage);
+    if (agendaFirst) {
+      const result = await analyzeAndApplyTaskMessage({
+        supabase,
+        userId,
+        conversationId,
+        sourceMessageId,
+        currentMessage: message,
+      });
+      if (taskResultHandled(result)) {
+        if (
+          (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+          result.applied.length
+        ) {
+          const taskIds = result.applied.map((item) => item.taskId);
+          after(async () => {
+            const settled = await Promise.allSettled(
+              taskIds.map((taskId) => syncTaskToGoogle(userId, taskId)),
+            );
+            settled.forEach((item, index) => {
+              if (item.status === "rejected") {
+                console.warn(
+                  `Tarefa ${taskIds[index]} não sincronizada com o Google:`,
+                  item.reason,
+                );
+              }
+            });
+          });
+        }
+        return NextResponse.json(formatTaskBrainToolResult(result));
+      }
+    }
+
     const suggestion = await resolvePendingRoutineSuggestion({
       supabase,
       userId,
@@ -104,14 +221,6 @@ export async function POST(request: Request) {
         ...suggestion,
       });
     }
-
-    const analysisMessage = await buildRoutineConversationContext({
-      supabase,
-      userId,
-      conversationId,
-      currentMessage: message,
-      sourceMessageId,
-    });
 
     const routine = await analyzeAndApplyRoutineMessage({
       supabase,

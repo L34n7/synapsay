@@ -307,6 +307,87 @@
   font-size: 16px;
   line-height: 1.5;
 }
+.microphonePreference {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid rgba(77, 232, 255, 0.1);
+  border-radius: 13px;
+  background: rgba(77, 232, 255, 0.035);
+}
+.preferenceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.preferenceHeader strong {
+  color: #c9f8ff;
+  font: 700 12px var(--font-geist-mono);
+  letter-spacing: 1.5px;
+  white-space: nowrap;
+}
+.preferenceHeader span {
+  max-width: 560px;
+  color: #7a7586;
+  font-size: 16px;
+  line-height: 1.45;
+}
+.microphoneChoices {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.microphoneChoices button {
+  min-height: 104px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  color: #8f8a9d;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 12px;
+  background: rgba(8, 9, 15, 0.62);
+  cursor: pointer;
+  transition: 0.2s;
+}
+.microphoneChoices button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(77, 232, 255, 0.22);
+}
+.microphoneChoices button > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.microphoneChoices strong {
+  color: #d7fbff;
+  font-size: 19px;
+}
+.microphoneChoices em {
+  padding: 4px 7px;
+  color: #051015;
+  border-radius: 999px;
+  background: #4de8ff;
+  font: 800 9px var(--font-geist-mono);
+  letter-spacing: 1px;
+  font-style: normal;
+}
+.microphoneChoices small {
+  color: #706c7b;
+  font-size: 16px;
+  line-height: 1.45;
+}
+.microphoneChoices .selected {
+  border-color: rgba(77, 232, 255, 0.34);
+  background: linear-gradient(
+    145deg,
+    rgba(77, 232, 255, 0.09),
+    rgba(145, 94, 255, 0.06)
+  );
+}
 .cardChoices {
   margin-top: 22px;
   display: grid;
@@ -587,8 +668,13 @@
   }
   .twoColumns,
   .choiceGroups,
+  .microphoneChoices,
   .textFields {
     grid-template-columns: 1fr;
+  }
+  .preferenceHeader {
+    flex-direction: column;
+    gap: 8px;
   }
   .textFields .wide {
     grid-column: auto;
@@ -608,6 +694,7 @@
     padding: 20px;
   }
   .cardChoices,
+  .microphoneChoices,
   .voiceChoices {
     grid-template-columns: 1fr;
   }

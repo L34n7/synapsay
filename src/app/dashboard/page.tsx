@@ -19,6 +19,8 @@ type VoiceState =
   | "muted"
   | "error";
 
+type MicrophoneMode = "push_to_talk" | "open";
+
 type RealtimeFunctionCall = {
   type?: string;
   name?: string;
@@ -75,7 +77,9 @@ export default function Dashboard() {
   const [interactionMode, setInteractionMode] = useState<"voice" | "text">("voice");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [microphoneMode, setMicrophoneMode] =
+    useState<MicrophoneMode>("push_to_talk");
   const [energy, setEnergy] = useState(0.08);
   const [transcript, setTranscript] = useState("Estou pronta. Como posso ajudar você hoje?");
   const [clock, setClock] = useState("");
@@ -95,7 +99,8 @@ export default function Dashboard() {
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const frameRef = useRef<number | null>(null);
-  const mutedRef = useRef(false);
+  const mutedRef = useRef(true);
+  const microphoneModeRef = useRef<MicrophoneMode>("push_to_talk");
   const connectedRef = useRef(false);
   const conversationIdRef = useRef<string | null>(null);
   const conversationPromiseRef = useRef<Promise<string> | null>(null);
@@ -112,15 +117,6 @@ export default function Dashboard() {
   const pendingRoutineSourcesRef = useRef<RoutineSourceLink[]>([]);
   const connectionAttemptRef = useRef(0);
   const voiceSelectionTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const savedMute = window.localStorage.getItem(MUTE_STORAGE_KEY) === "true";
-      mutedRef.current = savedMute;
-      setMuted(savedMute);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   const attachAnalyser = useCallback(
     (context: AudioContext, stream: MediaStream, target: "mic" | "output") => {
@@ -782,9 +778,32 @@ export default function Dashboard() {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
+
+      const tokenData = await tokenResponse.json();
+      if (connectionAttempt !== connectionAttemptRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      if (!tokenResponse.ok || !tokenData.value) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error(tokenData.error ?? "Não foi possível iniciar a IA por voz.");
+      }
+
+      const nextMicrophoneMode: MicrophoneMode =
+        tokenData.microphoneMode === "open" ? "open" : "push_to_talk";
+      const savedOpenMute =
+        typeof window !== "undefined" &&
+        window.localStorage.getItem(MUTE_STORAGE_KEY) === "true";
+      const initialMuted =
+        nextMicrophoneMode === "push_to_talk" ? true : savedOpenMute;
+      microphoneModeRef.current = nextMicrophoneMode;
+      mutedRef.current = initialMuted;
+      setMicrophoneMode(nextMicrophoneMode);
+      setMuted(initialMuted);
+
       streamRef.current = stream;
       stream.getAudioTracks().forEach((track) => {
-        track.enabled = !mutedRef.current;
+        track.enabled = !initialMuted;
       });
 
       const AudioContextClass = window.AudioContext;
@@ -794,11 +813,6 @@ export default function Dashboard() {
       attachAnalyser(context, stream, "mic");
       startMeter();
 
-      const tokenData = await tokenResponse.json();
-      if (connectionAttempt !== connectionAttemptRef.current) return;
-      if (!tokenResponse.ok || !tokenData.value) {
-        throw new Error(tokenData.error ?? "Não foi possível iniciar a IA por voz.");
-      }
       pendingRoutineSourcesRef.current = routineSourcesForHistory(
         tokenData.routineSources,
       );
@@ -921,6 +935,7 @@ export default function Dashboard() {
   }, [connect]);
 
   function toggleMute() {
+    if (microphoneModeRef.current === "push_to_talk") return;
     const next = !muted;
     setMuted(next);
     mutedRef.current = next;
@@ -930,6 +945,33 @@ export default function Dashboard() {
     });
     setVoiceState(next ? "muted" : "listening");
     setEnergy(next ? 0.04 : 0.08);
+  }
+
+  function setMicrophoneEnabled(enabled: boolean) {
+    const nextMuted = !enabled;
+    setMuted(nextMuted);
+    mutedRef.current = nextMuted;
+    streamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+    setVoiceState(nextMuted ? "muted" : "listening");
+    setEnergy(nextMuted ? 0.04 : 0.08);
+  }
+
+  function startPushToTalk() {
+    if (
+      microphoneModeRef.current !== "push_to_talk" ||
+      voiceState === "connecting" ||
+      voiceState === "error"
+    ) {
+      return;
+    }
+    setMicrophoneEnabled(true);
+  }
+
+  function stopPushToTalk() {
+    if (microphoneModeRef.current !== "push_to_talk") return;
+    setMicrophoneEnabled(false);
   }
 
   function stopVoice() {
@@ -982,6 +1024,7 @@ export default function Dashboard() {
 
       stopVoice();
       setMuted(true);
+      mutedRef.current = true;
       setVoiceState("muted");
       setTranscript(
         data.insertedCount
@@ -1006,7 +1049,29 @@ export default function Dashboard() {
     window.location.href = "/";
   }
 
-  const copy = stateCopy[voiceState];
+  const copy =
+    voiceState === "muted" && microphoneMode === "push_to_talk"
+      ? {
+          label: "APERTE PARA FALAR",
+          detail: "Segure o botão do microfone enquanto fala",
+        }
+      : stateCopy[voiceState];
+  const micButtonText =
+    microphoneMode === "push_to_talk"
+      ? muted
+        ? "SEGURE PARA FALAR"
+        : "SOLTE PARA MUTAR"
+      : muted
+        ? "ATIVAR MICROFONE"
+        : "MUTAR MICROFONE";
+  const micButtonAria =
+    microphoneMode === "push_to_talk"
+      ? muted
+        ? "Segurar para falar"
+        : "Soltar para mutar"
+      : muted
+        ? "Ativar microfone"
+        : "Mutar microfone";
 
   return (
     <main
@@ -1113,12 +1178,34 @@ export default function Dashboard() {
           )}
           <button
             className={`${styles.micButton} ${muted ? styles.isMuted : ""}`}
-            onClick={toggleMute}
+            onClick={microphoneMode === "open" ? toggleMute : undefined}
+            onPointerDown={microphoneMode === "push_to_talk" ? startPushToTalk : undefined}
+            onPointerUp={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
+            onPointerCancel={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
+            onPointerLeave={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
+            onKeyDown={(event) => {
+              if (
+                microphoneMode === "push_to_talk" &&
+                (event.key === " " || event.key === "Enter")
+              ) {
+                event.preventDefault();
+                startPushToTalk();
+              }
+            }}
+            onKeyUp={(event) => {
+              if (
+                microphoneMode === "push_to_talk" &&
+                (event.key === " " || event.key === "Enter")
+              ) {
+                event.preventDefault();
+                stopPushToTalk();
+              }
+            }}
             disabled={voiceState === "connecting" || voiceState === "error"}
-            aria-label={muted ? "Ativar microfone" : "Mutar microfone"}
+            aria-label={micButtonAria}
           >
             <span><MicIcon muted={muted} /></span>
-            <b>{muted ? "ATIVAR MICROFONE" : "MUTAR MICROFONE"}</b>
+            <b>{micButtonText}</b>
             <i />
           </button>
           <button

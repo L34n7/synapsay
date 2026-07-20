@@ -88,11 +88,13 @@ export const COMMUNICATION_STYLES = [
 
 export const RESPONSE_DETAILS = ["short", "balanced", "detailed"] as const;
 export const ASSISTANT_TONES = ["friendly", "professional", "casual"] as const;
+export const MICROPHONE_MODES = ["push_to_talk", "open"] as const;
 
 export type AssistantVoice = (typeof ASSISTANT_VOICES)[number];
 export type CommunicationStyle = (typeof COMMUNICATION_STYLES)[number];
 export type ResponseDetail = (typeof RESPONSE_DETAILS)[number];
 export type AssistantTone = (typeof ASSISTANT_TONES)[number];
+export type MicrophoneMode = (typeof MICROPHONE_MODES)[number];
 
 export type AssistantPersonality = {
   displayName: string;
@@ -102,6 +104,7 @@ export type AssistantPersonality = {
   communicationStyle: CommunicationStyle;
   responseDetail: ResponseDetail;
   tone: AssistantTone;
+  microphoneMode: MicrophoneMode;
   boundaries: string;
   prohibitedTopics: string[];
   customInstructions: string;
@@ -116,6 +119,7 @@ export type PersonalityRow = {
   communication_style?: unknown;
   response_detail?: unknown;
   assistant_tone?: unknown;
+  microphone_mode?: unknown;
   assistant_boundaries?: unknown;
   prohibited_topics?: unknown;
   custom_instructions?: unknown;
@@ -130,6 +134,7 @@ export const DEFAULT_PERSONALITY: AssistantPersonality = {
   communicationStyle: "balanced",
   responseDetail: "balanced",
   tone: "friendly",
+  microphoneMode: "push_to_talk",
   boundaries: "",
   prohibitedTopics: [],
   customInstructions: "",
@@ -187,6 +192,9 @@ export function normalizePersonalityRow(
     tone: isOneOf(ASSISTANT_TONES, row?.assistant_tone)
       ? row.assistant_tone
       : DEFAULT_PERSONALITY.tone,
+    microphoneMode: isOneOf(MICROPHONE_MODES, row?.microphone_mode)
+      ? row.microphone_mode
+      : DEFAULT_PERSONALITY.microphoneMode,
     boundaries: cleanText(row?.assistant_boundaries, 1500),
     prohibitedTopics: normalizeProhibitedTopics(row?.prohibited_topics),
     customInstructions: cleanText(row?.custom_instructions, 2000),

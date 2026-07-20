@@ -119,6 +119,7 @@ export function taskForAssistant(task: TaskRecord) {
     dueSpeech: formatTaskSpeechDateTime(task.due_at, timeZone, task.all_day),
     allDay: task.all_day,
     timeZone,
+    recurrenceRule: task.recurrence_rule,
     reminders: (task.reminders ?? [])
       .filter((reminder) => reminder.status === "scheduled")
       .map((reminder) => ({

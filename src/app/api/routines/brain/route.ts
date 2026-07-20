@@ -7,7 +7,9 @@ import { tryCreateNewsRoutineFallback } from "@/lib/routines/fallback";
 import { resolvePendingRoutineSuggestion } from "@/lib/routines/suggestions";
 
 const STRONG_ROUTINE_INTENT =
-  /(?:rotina|agend(?:a|ar|e)|program(?:a|ar|e)|automatiz(?:a|ar|e)|todo dia|todos os dias|primeira conversa|próxima conversa|proxima conversa|a partir das|sempre que)/i;
+  /(?:rotina|program(?:a|ar|e)|automatiz(?:a|ar|e)|todo dia|todos os dias|primeira conversa|próxima conversa|proxima conversa|a partir das|sempre que|briefing|notícias|noticias|resumo)/i;
+const AGENDA_ONLY_INTENT =
+  /(?:agenda|calend[aá]rio|google agenda|google calendar|compromisso|evento|lembrete|tarefa|reuni[aã]o|consulta|culto|ensaio|academia)/i;
 
 function executionMarker(message: string) {
   const routineId = message.match(/routineId=([0-9a-f-]{36})/i)?.[1] ?? null;
@@ -118,6 +120,15 @@ export async function POST(request: Request) {
       sourceMessageId,
     });
     const userRoutineText = extractUserRoutineText(analysisMessage);
+
+    if (AGENDA_ONLY_INTENT.test(userRoutineText) && !STRONG_ROUTINE_INTENT.test(userRoutineText)) {
+      return NextResponse.json({
+        handled: true,
+        operation: "clarification",
+        summary:
+          "Isso parece uma agenda no calendário, não uma rotina do assistente. Confirme se quer criar uma agenda ou uma rotina antes de salvar.",
+      });
+    }
 
     const result = await analyzeAndApplyRoutineMessage({
       supabase,

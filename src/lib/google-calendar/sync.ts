@@ -53,6 +53,7 @@ type TaskForGoogle = {
   due_at: string | null;
   all_day: boolean;
   timezone: string;
+  recurrence_rule: string | null;
   updated_at: string;
   reminders?: Array<{ remind_at: string; status: string }>;
 };
@@ -69,7 +70,7 @@ type EventLink = {
 };
 
 const TASK_SELECT =
-  "id, user_id, title, description, status, scheduled_at, due_at, all_day, timezone, updated_at, reminders(remind_at, status)";
+  "id, user_id, title, description, status, scheduled_at, due_at, all_day, timezone, recurrence_rule, updated_at, reminders(remind_at, status)";
 const SYNC_LOCK_TTL_MS = 10 * 60_000;
 
 type SyncGoogleCalendarOptions = {
@@ -155,6 +156,7 @@ function taskAsGoogleEvent(task: TaskForGoogle) {
     description: task.description || undefined,
     extendedProperties: { private: { synapsayTaskId: task.id } },
     reminders: googleReminder(task, start),
+    recurrence: task.recurrence_rule ? [task.recurrence_rule] : undefined,
   };
   if (task.all_day) {
     const startDate = dateKey(start, timeZone);

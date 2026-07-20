@@ -3,6 +3,7 @@ import {
   ASSISTANT_TONES,
   ASSISTANT_VOICES,
   COMMUNICATION_STYLES,
+  MICROPHONE_MODES,
   RESPONSE_DETAILS,
   normalizePersonalityRow,
   normalizeProhibitedTopics,
@@ -17,7 +18,17 @@ import { voicePreviewCacheKey } from "@/lib/voice-preview-cache";
 export const runtime = "nodejs";
 
 const PROFILE_COLUMNS =
+  "display_name, birthday, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, microphone_mode, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed" as const;
+const PROFILE_COLUMNS_WITHOUT_MICROPHONE =
   "display_name, birthday, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed" as const;
+
+function isMissingMicrophoneColumn(error: { message?: string; code?: string } | null) {
+  return Boolean(
+    error &&
+      (error.code === "PGRST204" ||
+        String(error.message ?? "").includes("microphone_mode")),
+  );
+}
 
 async function authenticatedProfile() {
   const supabase = await createClient();
@@ -29,11 +40,23 @@ export async function GET() {
   const { supabase, userId } = await authenticatedProfile();
   if (!userId) return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
 
-  const { data, error } = await supabase
+  const profileResult = await supabase
     .from("profiles")
     .select(PROFILE_COLUMNS)
     .eq("id", userId)
     .maybeSingle();
+  let data = profileResult.data as Record<string, unknown> | null;
+  let error = profileResult.error;
+
+  if (isMissingMicrophoneColumn(error)) {
+    const fallback = await supabase
+      .from("profiles")
+      .select(PROFILE_COLUMNS_WITHOUT_MICROPHONE)
+      .eq("id", userId)
+      .maybeSingle();
+    data = fallback.data as Record<string, unknown> | null;
+    error = fallback.error;
+  }
 
   if (error) {
     return NextResponse.json(
@@ -62,6 +85,7 @@ export async function PATCH(request: Request) {
   const communicationStyle = typeof body?.communicationStyle === "string" ? body.communicationStyle : "";
   const responseDetail = typeof body?.responseDetail === "string" ? body.responseDetail : "";
   const tone = typeof body?.tone === "string" ? body.tone : "";
+  const microphoneMode = typeof body?.microphoneMode === "string" ? body.microphoneMode : "";
   const prohibitedTopics = normalizeProhibitedTopics(body?.prohibitedTopics);
 
   if (displayName.error) return NextResponse.json({ error: displayName.error }, { status: 400 });
@@ -71,6 +95,7 @@ export async function PATCH(request: Request) {
   if (!COMMUNICATION_STYLES.includes(communicationStyle as never)) return NextResponse.json({ error: "Estilo inválido." }, { status: 400 });
   if (!RESPONSE_DETAILS.includes(responseDetail as never)) return NextResponse.json({ error: "Nível de detalhe inválido." }, { status: 400 });
   if (!ASSISTANT_TONES.includes(tone as never)) return NextResponse.json({ error: "Tom inválido." }, { status: 400 });
+  if (!MICROPHONE_MODES.includes(microphoneMode as never)) return NextResponse.json({ error: "Modo de microfone inválido." }, { status: 400 });
   if (boundaries.length > 1500 || customInstructions.length > 2000) return NextResponse.json({ error: "Um dos campos de instruções excedeu o limite permitido." }, { status: 400 });
 
   const { data, error } = await supabase
@@ -83,6 +108,7 @@ export async function PATCH(request: Request) {
       communication_style: communicationStyle,
       response_detail: responseDetail,
       assistant_tone: tone,
+      microphone_mode: microphoneMode,
       assistant_boundaries: boundaries,
       prohibited_topics: prohibitedTopics,
       custom_instructions: customInstructions,
@@ -93,6 +119,12 @@ export async function PATCH(request: Request) {
     .single();
 
   if (error) {
+    if (isMissingMicrophoneColumn(error)) {
+      return NextResponse.json(
+        { error: "A migration do modo de microfone ainda precisa ser aplicada." },
+        { status: 500 },
+      );
+    }
     return NextResponse.json(
       { error: "Não foi possível salvar a personalidade. Verifique as migrations de perfil." },
       { status: 500 },

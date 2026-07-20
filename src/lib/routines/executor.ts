@@ -430,6 +430,14 @@ export async function resolvePendingRoutine({
   );
   const postpone = /(mais tarde|daqui a\s+\d+|pergunte depois|lembre depois)/.test(normalized);
   if (!affirmative && !decline && !disable && !postpone) return null;
+  const startsNewAgendaRequest =
+    /\b(criar|crie|cadastre|registr(?:a|e)|agend(?:a|ar|e)|agenda|calendario|calendário|google agenda|google calendar|compromisso|evento|lembrete|tarefa|reuniao|reunião|consulta|culto|ensaio|academia)\b/.test(
+      normalized,
+    ) &&
+    !/(essa rotina|esta rotina|a rotina|rotina anterior|pode executar|executa agora|execute agora|manda|traga|rode)/.test(
+      normalized,
+    );
+  if (startsNewAgendaRequest) return null;
 
   const { data: run } = await supabase
     .from("assistant_routine_runs")

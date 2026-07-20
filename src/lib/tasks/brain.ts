@@ -11,6 +11,7 @@ import {
   normalizePriority,
   taskMoment,
   validDate,
+  validRecurrenceRule,
   type TaskRecord,
 } from "@/lib/tasks/types";
 
@@ -23,6 +24,7 @@ type RawAction = {
   scheduled_at?: unknown;
   due_at?: unknown;
   all_day?: unknown;
+  recurrence_rule?: unknown;
   reminder_at?: unknown;
 };
 
@@ -85,6 +87,7 @@ const taskDecisionSchema = {
           "scheduled_at",
           "due_at",
           "all_day",
+          "recurrence_rule",
           "reminder_at",
         ],
         properties: {
@@ -99,6 +102,7 @@ const taskDecisionSchema = {
           scheduled_at: { type: ["string", "null"] },
           due_at: { type: ["string", "null"] },
           all_day: { type: "boolean" },
+          recurrence_rule: { type: ["string", "null"] },
           reminder_at: { type: ["string", "null"] },
         },
       },
@@ -267,6 +271,7 @@ export async function analyzeAndApplyTaskMessage({
         "Ignore frases interrompidas, reticências e pensamentos que ficaram sem complemento. Nunca associe um horário dito em uma frase completa posterior a uma frase anterior incompleta. Só combine trechos quando o usuário completar explicitamente a mesma informação.",
         "Para hoje/amanhã sem horário exato, use uma data desse dia em scheduled_at, marque all_day=true e deixe reminder_at=null. Para expressões vagas como 'mais tarde', 'depois da igreja' ou 'daqui a pouco', nunca invente horário.",
         "Ao converter um horário falado pelo usuário para ISO 8601, interprete-o primeiro em America/Sao_Paulo e inclua o deslocamento local -03:00 no valor gerado.",
+        "Quando houver recorrência explícita, preencha recurrence_rule em formato RRULE simples, sem DTSTART. Exemplos: segunda a sexta = RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR; toda semana = RRULE:FREQ=WEEKLY; todos os dias = RRULE:FREQ=DAILY. Sem recorrência explícita, use null.",
         "Só preencha reminder_at quando houver horário exato ou um deslocamento calculável. Se o usuário pedir para ser avisado mas não informar horário suficiente, registre a tarefa, defina needs_clarification=true e faça uma pergunta curta pedindo o horário.",
         "Ao alterar, concluir ou cancelar, use exclusivamente um task_id fornecido na lista de tarefas. Se houver ambiguidade, não aplique ação e peça esclarecimento.",
         "Não duplique uma tarefa existente com o mesmo significado; atualize-a quando a nova mensagem completar data, horário, descrição ou lembrete.",
@@ -331,6 +336,7 @@ export async function analyzeAndApplyTaskMessage({
       if (!taskId) {
         const scheduledAt = validDate(action.scheduled_at);
         const dueAt = validDate(action.due_at);
+        const recurrenceRule = validRecurrenceRule(action.recurrence_rule);
         const { data: inserted, error } = await supabase
           .from("tasks")
           .insert({
@@ -349,6 +355,7 @@ export async function analyzeAndApplyTaskMessage({
             scheduled_at: scheduledAt,
             due_at: dueAt && (!scheduledAt || dueAt >= scheduledAt) ? dueAt : null,
             all_day: action.all_day === true,
+            recurrence_rule: recurrenceRule,
             timezone: "America/Sao_Paulo",
             created_by: "assistant",
           })
@@ -395,6 +402,7 @@ export async function analyzeAndApplyTaskMessage({
 
     const scheduledAt = validDate(action.scheduled_at);
     const dueAt = validDate(action.due_at);
+    const recurrenceRule = validRecurrenceRule(action.recurrence_rule);
     const title =
       typeof action.title === "string" && action.title.trim().length >= 2
         ? action.title.trim().slice(0, 160)
@@ -411,6 +419,7 @@ export async function analyzeAndApplyTaskMessage({
         scheduled_at: scheduledAt,
         due_at: dueAt && (!scheduledAt || dueAt >= scheduledAt) ? dueAt : null,
         all_day: action.all_day === true,
+        recurrence_rule: action.recurrence_rule === null ? null : recurrenceRule ?? current.recurrence_rule,
       })
       .eq("id", taskId)
       .eq("user_id", userId);
@@ -465,6 +474,7 @@ export function formatTaskBrainToolResult(result: TaskBrainResult) {
       "Para resposta ao usuário, prefira scheduledSpeech, dueSpeech e remindAtSpeech. Eles já estão no formato natural correto.",
       "Use scheduledLocal, dueLocal e remindAtLocal apenas como referência técnica; nunca recalcule nem converta horário.",
       "Ao falar horário, use 'às'. Exemplo: 'amanhã, às 14:00'.",
+      "Se task.recurrenceRule existir, informe a recorrência em linguagem natural e não trate como evento único.",
       "Não diga o ano quando for o ano atual; se precisar dizer data, inclua também o dia da semana.",
       "Confirme um lembrete somente quando ele aparecer em task.reminders.",
       "Não mencione o status pending, a menos que o usuário pergunte pelo status.",

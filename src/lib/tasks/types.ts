@@ -42,6 +42,19 @@ export function validDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+export function validRecurrenceRule(value: unknown) {
+  if (typeof value !== "string") return null;
+  const rule = value.trim().toUpperCase();
+  if (!rule) return null;
+  if (rule.length > 240) return null;
+  if (!rule.startsWith("RRULE:FREQ=")) return null;
+  if (!/^RRULE:[A-Z0-9=,;_-]+$/.test(rule)) return null;
+  if (rule.includes("DTSTART") || rule.includes("EXDATE") || rule.includes("RDATE")) {
+    return null;
+  }
+  return rule;
+}
+
 export function normalizePriority(value: unknown) {
   return Math.min(5, Math.max(1, Math.round(Number(value) || 3)));
 }
@@ -53,4 +66,3 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
 export function taskMoment(task: Pick<TaskRecord, "scheduled_at" | "due_at">) {
   return task.scheduled_at ?? task.due_at;
 }
-

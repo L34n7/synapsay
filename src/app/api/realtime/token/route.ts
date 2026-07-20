@@ -94,7 +94,7 @@ export async function GET(request: Request) {
   const { data: profile } = await supabase
     .from("profiles")
     .select(
-      "display_name, birthday, timezone, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed",
+      "display_name, birthday, timezone, assistant_name, preferred_voice, communication_style, response_detail, assistant_tone, microphone_mode, assistant_boundaries, prohibited_topics, custom_instructions, onboarding_completed",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -270,7 +270,11 @@ export async function GET(request: Request) {
     [
       "manage_tasks gerencia somente tarefas, compromissos e lembretes da agenda.",
       "manage_routines gerencia exclusivamente rotinas recorrentes do assistente.",
-      "Para qualquer pedido de criar, agendar, programar, automatizar, alterar, pausar, excluir, confirmar ou executar uma rotina, você DEVE chamar manage_routines antes de responder.",
+      "Antes de chamar uma ferramenta, diferencie rigorosamente: agenda/calendário/Google Calendar/compromisso/evento/lembrete/tarefa usam manage_tasks; rotina/primeira conversa/ao iniciar conversa/briefing recorrente/ação automática do assistente usam manage_routines.",
+      "Se o pedido puder ser tanto agenda quanto rotina e o histórico recente não deixar claro, não chame ferramenta ainda. Pergunte: \"Só para confirmar: você quer que eu crie uma rotina ou uma agenda no calendário?\"",
+      "Exemplo ambíguo sem contexto: \"toda semana, academia, dezesseis horas\". Pergunte se é rotina ou agenda.",
+      "Se o usuário disser agenda, calendário, Google, compromisso ou evento, use manage_tasks mesmo que haja recorrência como toda semana, segunda a sexta ou todos os dias.",
+      "Para qualquer pedido explícito de criar, alterar, pausar, excluir, confirmar ou executar uma rotina, você DEVE chamar manage_routines antes de responder.",
       "Envie em message o pedido completo, reunindo detalhes relevantes das falas imediatamente anteriores: horário, recorrência, assunto, fontes e confirmação.",
       "Rotinas automáticas da abertura já são executadas pelo servidor. Quando o conteúdo vier em <conteudo_rotina>, apresente-o e não chame ferramenta novamente.",
       "Para confirmar ou recusar rotina pendente, chame manage_routines mesmo que a resposta seja apenas sim, agora não ou não quero mais.",
@@ -378,7 +382,7 @@ export async function GET(request: Request) {
             {
               type: "function",
               name: "manage_tasks",
-              description: "Gerencia exclusivamente tarefas, compromissos e lembretes da agenda.",
+              description: "Gerencia exclusivamente tarefas, compromissos, eventos de calendário/Google Agenda e lembretes. Use para academia, culto, reunião, consulta e outros compromissos em horário marcado.",
               parameters: {
                 type: "object",
                 additionalProperties: false,
@@ -389,7 +393,7 @@ export async function GET(request: Request) {
             {
               type: "function",
               name: "manage_routines",
-              description: "Cria, atualiza, pausa, reativa, exclui, confirma e executa rotinas recorrentes. Use obrigatoriamente para qualquer pedido de rotina ou briefing recorrente.",
+              description: "Cria, atualiza, pausa, reativa, exclui, confirma e executa rotinas recorrentes do assistente. Não use para compromissos da agenda ou calendário.",
               parameters: {
                 type: "object",
                 additionalProperties: false,
@@ -425,7 +429,7 @@ export async function GET(request: Request) {
     );
   }
   return NextResponse.json(
-    { ...data, startupBriefing, routineSources },
+    { ...data, startupBriefing, routineSources, microphoneMode: personality.microphoneMode },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

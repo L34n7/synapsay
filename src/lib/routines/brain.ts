@@ -61,6 +61,16 @@ type RoutineOperation = {
 };
 
 const routineWords = /(?:rotina|agend(?:a|ar|e|ado|amento)|program(?:a|ar|e|ado|ação)|automatiz(?:a|ar|e|ado|ação)|todo dia|todos os dias|diariamente|semanalmente|toda semana|primeira conversa|ao iniciar|quando eu (?:iniciar|abrir|falar|conversar)|sempre que|depois das|a partir das|antes das|pela manhã|de manhã|ao meio-dia|depois do trabalho|me pergunte antes|não pergunte|\b(?:duas|três|tres|quatro|cinco|\d+) vezes\b|resumo|briefing|notícias do dia|notícias pela manhã|pare de falar|pause|desative|reative|exclua|muito longo|mais curto|mais tecnologia|menos política|fonte|site específico|estou gostando|não estou gostando)/i;
+const explicitRoutineWords = /(?:\brotina\b|primeira conversa|ao iniciar|quando eu (?:iniciar|abrir|falar|conversar)|briefing|not[ií]cias|resumo|me pergunte antes|n[aã]o pergunte|execute automaticamente|executar automaticamente|rotina autom[aá]tica)/i;
+const explicitAgendaWords = /(?:agenda|calend[aá]rio|google calendar|google agenda|compromisso|evento|lembrete|tarefa|reuni[aã]o|consulta|culto|ensaio)/i;
+const scheduleShapeWords = /(?:toda semana|semanalmente|segunda a sexta|todo dia|todos os dias|diariamente|\b(?:segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)\b|\b\d{1,2}(?::\d{2})?\s*h?\b|\b(?:uma|duas|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte)\s+horas?\b)/i;
+
+export function isAmbiguousRoutineAgendaRequest(message: string) {
+  const text = message.trim();
+  if (!text) return false;
+  if (explicitRoutineWords.test(text) || explicitAgendaWords.test(text)) return false;
+  return scheduleShapeWords.test(text);
+}
 
 function outputText(data: unknown) {
   return responseOutputText(data);
@@ -193,8 +203,10 @@ async function classify(args: Args, routines: AssistantRoutine[]) {
           role: "system",
           content: [
             "Extraia a intenção de gerenciamento de rotinas do assistente.",
-            "Pedidos como agendar, programar ou automatizar notícias, briefings, assuntos, tarefas ou informações em uma janela recorrente significam operation=create.",
+            "Pedidos como programar ou automatizar notícias, briefings, assuntos, tarefas ou informações em uma janela recorrente significam operation=create.",
             "Uma rotina é diferente de um compromisso da agenda: ela executa uma ação do assistente quando a conversa começa dentro da janela configurada.",
+            "Se o usuário pedir agenda, calendário, Google Agenda, compromisso, evento, reunião, consulta, culto, ensaio ou academia em horário marcado, retorne operation=none; isso pertence à agenda, não a rotinas.",
+            "Se o pedido puder ser tanto agenda quanto rotina e não houver palavra explícita de rotina, retorne operation=none para que o assistente peça confirmação.",
             "Nunca crie rotina apenas porque o usuário comentou repetidamente sobre um tema; nesse caso use operation=signal.",
             "Datas devem usar AAAA-MM-DD e horários HH:mm.",
             "Quando o usuário disser a partir de um horário e não informar o fim, use 23:59.",
@@ -274,6 +286,15 @@ function speechFor(op: RoutineOperation, routine?: Partial<AssistantRoutine>) {
 }
 
 export async function analyzeAndApplyRoutineMessage(args: Args): Promise<RoutineBrainResult> {
+  if (isAmbiguousRoutineAgendaRequest(args.message)) {
+    return {
+      handled: true,
+      summary:
+        "Só para confirmar: você quer que eu crie uma rotina do assistente ou uma agenda no calendário?",
+      operation: "clarification",
+    };
+  }
+
   if (!routineWords.test(args.message)) {
     await recordInterestSignal(args).catch(() => null);
     return { handled: false, summary: "", operation: "none" };

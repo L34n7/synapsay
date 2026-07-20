@@ -7,11 +7,13 @@ import {
   ASSISTANT_VOICES,
   COMMUNICATION_STYLES,
   DEFAULT_PERSONALITY,
+  MICROPHONE_MODES,
   RESPONSE_DETAILS,
   type AssistantPersonality,
   type AssistantTone,
   type AssistantVoice,
   type CommunicationStyle,
+  type MicrophoneMode,
   type ResponseDetail,
 } from "@/lib/personality";
 import { createClient } from "@/lib/supabase/client";
@@ -51,6 +53,23 @@ const tones: Record<AssistantTone, string> = {
   friendly: "Amigável",
   professional: "Profissional",
   casual: "Descontraído",
+};
+
+const microphoneModes: Record<
+  MicrophoneMode,
+  { label: string; detail: string; badge?: string }
+> = {
+  push_to_talk: {
+    label: "Apertar para falar",
+    detail:
+      "Recomendado. O microfone fica fechado e só escuta enquanto você segura o botão.",
+    badge: "RECOMENDADO",
+  },
+  open: {
+    label: "Microfone aberto",
+    detail:
+      "Conversa contínua, mas qualquer fala ou ruído no ambiente pode entrar e atrapalhar.",
+  },
 };
 
 function clientApiUrl(path: string) {
@@ -375,6 +394,29 @@ export default function PersonalityPage() {
                 ))}
               </div>
               <p className={styles.voicePreviewNote}>Prévia curta gerada por IA com o seu primeiro nome. Há um intervalo de 3 segundos entre reproduções e o áudio fica em cache neste navegador por até 30 dias.</p>
+              <div className={styles.microphonePreference}>
+                <div className={styles.preferenceHeader}>
+                  <strong>MODO DO MICROFONE</strong>
+                  <span>A recomendação é apertar para falar para evitar que conversas no fundo entrem na IA.</span>
+                </div>
+                <div className={styles.microphoneChoices}>
+                  {MICROPHONE_MODES.map((mode) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      className={form.microphoneMode === mode ? styles.selected : ""}
+                      onClick={() => setField("microphoneMode", mode)}
+                      disabled={loading}
+                    >
+                      <span>
+                        <strong>{microphoneModes[mode].label}</strong>
+                        {microphoneModes[mode].badge && <em>{microphoneModes[mode].badge}</em>}
+                      </span>
+                      <small>{microphoneModes[mode].detail}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </section>
 
             <section className={styles.panel}>
@@ -405,7 +447,8 @@ export default function PersonalityPage() {
             <span>{voices[form.preferredVoice].split(" — ")[0].toUpperCase()} VOICE</span>
             <div className={styles.wave}>{Array.from({ length: 25 }, (_, index) => <i key={index} />)}</div>
             <div className={styles.sample}><small>EXEMPLO DE RESPOSTA</small><p>{preview}</p></div>
-            <dl><div><dt>ESTILO</dt><dd>{communication[form.communicationStyle].label}</dd></div><div><dt>DETALHE</dt><dd>{details[form.responseDetail]}</dd></div><div><dt>TOM</dt><dd>{tones[form.tone]}</dd></div><div><dt>BLOQUEIOS</dt><dd>{topicsText.split(/[\n,;]+/).filter((value) => value.trim()).length}</dd></div></dl>
+            <dl><div><dt>ESTILO</dt><dd>{communication[form.communicationStyle].label}</dd></div><div><dt>DETALHE</dt><dd>{details[form.responseDetail]}</dd></div><div><dt>TOM</dt><dd>{tones[form.tone]}</dd></div><div><dt>MICROFONE</dt><dd>{microphoneModes[form.microphoneMode].label}</dd></div></dl>
+            <dl><div><dt>BLOQUEIOS</dt><dd>{topicsText.split(/[\n,;]+/).filter((value) => value.trim()).length}</dd></div></dl>
             <dl><div><dt>USUÁRIO</dt><dd>{form.displayName || "Não informado"}</dd></div><div><dt>ANIVERSÁRIO</dt><dd>{form.birthday || "Não informado"}</dd></div></dl>
             <button type="button" onClick={restore} disabled={saving}>RESTAURAR PADRÃO</button>
             <button type="button" className={styles.save} onClick={() => void save()} disabled={saving || loading}>{saving ? "SINCRONIZANDO..." : onboardingMode ? "SALVAR E COMEÇAR" : "SALVAR PERSONALIDADE"}</button>
