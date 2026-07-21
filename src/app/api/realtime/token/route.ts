@@ -429,7 +429,14 @@ export async function GET(request: Request) {
     );
   }
   return NextResponse.json(
-    { ...data, startupBriefing, routineSources, microphoneMode: personality.microphoneMode },
+    {
+      ...data,
+      startupBriefing,
+      routineSources,
+      microphoneMode: personality.microphoneMode,
+      preferredVoice: personality.preferredVoice,
+      assistantName: personality.assistantName,
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

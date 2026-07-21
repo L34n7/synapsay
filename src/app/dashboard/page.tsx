@@ -852,6 +852,18 @@ export default function Dashboard() {
       channel.onopen = () => {
         connectedRef.current = true;
         setVoiceState(mutedRef.current ? "muted" : "listening");
+        if (typeof tokenData.preferredVoice === "string") {
+          channel.send(
+            JSON.stringify({
+              type: "session.update",
+              session: {
+                audio: {
+                  output: { voice: tokenData.preferredVoice },
+                },
+              },
+            }),
+          );
+        }
         window.setTimeout(() => {
           void fetch("/api/history/backfill", {
             method: "POST",
