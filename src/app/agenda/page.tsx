@@ -52,6 +52,13 @@ function taskDate(task: TaskRecord) {
   return task.scheduled_at ?? task.due_at;
 }
 
+function taskTimestamp(task: TaskRecord) {
+  const value = taskDate(task);
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
 function taskToDraft(task: TaskRecord): Draft {
   const reminder = (task.reminders ?? []).find((item) => item.status === "scheduled");
   return {
@@ -148,7 +155,13 @@ export default function AgendaPage() {
     return tasks
       .filter((task) => {
         const moment = taskDate(task);
-        if (filter === "completed") return task.status === "completed";
+        if (filter === "completed") {
+          return Boolean(
+            task.status === "completed" &&
+              moment &&
+              localDateKey(moment) === selectedDate,
+          );
+        }
         if (filter === "all") return task.status !== "cancelled";
         if (!["pending", "in_progress"].includes(task.status)) return false;
         if (filter === "today") {
@@ -156,11 +169,7 @@ export default function AgendaPage() {
         }
         return !moment || currentTime === 0 || new Date(moment).getTime() >= currentTime;
       })
-      .sort((a, b) => {
-        const aTime = taskDate(a) ? new Date(taskDate(a)!).getTime() : Number.MAX_SAFE_INTEGER;
-        const bTime = taskDate(b) ? new Date(taskDate(b)!).getTime() : Number.MAX_SAFE_INTEGER;
-        return aTime - bTime || b.priority - a.priority;
-      });
+      .sort((a, b) => taskTimestamp(b) - taskTimestamp(a) || b.priority - a.priority);
   }, [currentTime, filter, selectedDate, tasks]);
 
   async function requestNotifications() {
@@ -214,10 +223,10 @@ export default function AgendaPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao atualizar tarefa.");
-      setTasks((current) =>
-        current.map((task) => (task.id === id ? data.task : task)),
-      );
-      if (data.googleSyncWarning) setError(`Tarefa atualizada. Google Agenda: ${data.googleSyncWarning}`);
+      setTasks((current) => current.map((task) => (task.id === id ? data.task : task)));
+      if (data.googleSyncWarning) {
+        setError(`Tarefa atualizada. Google Agenda: ${data.googleSyncWarning}`);
+      }
       setEditingId(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao atualizar tarefa.");
@@ -246,7 +255,9 @@ export default function AgendaPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha ao excluir tarefa.");
       setTasks((current) => current.filter((item) => item.id !== task.id));
-      if (data.googleSyncWarning) setError(`Tarefa excluída. Google Agenda: ${data.googleSyncWarning}`);
+      if (data.googleSyncWarning) {
+        setError(`Tarefa excluída. Google Agenda: ${data.googleSyncWarning}`);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao excluir tarefa.");
     } finally {
@@ -348,7 +359,7 @@ export default function AgendaPage() {
             >
               {item === "today" && "Dia selecionado"}
               {item === "upcoming" && "Próximas"}
-              {item === "completed" && "Concluídas"}
+              {item === "completed" && "Concluídas do dia"}
               {item === "all" && "Todas"}
             </button>
           ))}
@@ -402,25 +413,36 @@ export default function AgendaPage() {
                   <h2>{task.title}</h2>
                   {task.description && <p>{task.description}</p>}
                   <div className={styles.schedule}>
-                    <span>{taskDate(task) ? new Intl.DateTimeFormat("pt-BR", {
-                      dateStyle: "medium",
-                      timeStyle: task.all_day ? undefined : "short",
-                    }).format(new Date(taskDate(task)!)) : "SEM DATA DEFINIDA"}</span>
-                    {(task.reminders ?? []).filter((item) => item.status === "scheduled").map(
-                      (reminder) => (
+                    <span>
+                      {taskDate(task)
+                        ? new Intl.DateTimeFormat("pt-BR", {
+                            dateStyle: "medium",
+                            timeStyle: task.all_day ? undefined : "short",
+                          }).format(new Date(taskDate(task)!))
+                        : "SEM DATA DEFINIDA"}
+                    </span>
+                    {(task.reminders ?? [])
+                      .filter((item) => item.status === "scheduled")
+                      .map((reminder) => (
                         <span key={reminder.id} className={styles.reminder}>
                           LEMBRETE {new Intl.DateTimeFormat("pt-BR", {
                             dateStyle: "short",
                             timeStyle: "short",
                           }).format(new Date(reminder.remind_at))}
                         </span>
-                      ),
-                    )}
+                      ))}
                   </div>
                 </div>
                 <div className={styles.cardActions}>
                   <button onClick={() => beginEdit(task)}>EDITAR</button>
-                  {task.status !== "completed" && (
+                  {task.status === "completed" ? (
+                    <button
+                      disabled={busyId === task.id}
+                      onClick={() => void patchTask(task.id, { status: "pending" })}
+                    >
+                      MARCAR COMO INCOMPLETA
+                    </button>
+                  ) : (
                     <button onClick={() => void patchTask(task.id, { status: "cancelled" })}>
                       CANCELAR
                     </button>
