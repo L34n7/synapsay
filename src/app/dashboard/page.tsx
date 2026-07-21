@@ -12,6 +12,7 @@ import TextChat from "./TextChat";
 import styles from "./dashboard.module.css";
 
 type VoiceState =
+  | "idle"
   | "connecting"
   | "listening"
   | "hearing"
@@ -52,6 +53,7 @@ const UUID_PATTERN =
 const MUTE_STORAGE_KEY = "synapsay:microphone-muted";
 
 const stateCopy: Record<VoiceState, { label: string; detail: string }> = {
+  idle: { label: "AGUARDANDO VOCÊ", detail: "Segure o botão para iniciar" },
   connecting: { label: "SINCRONIZANDO", detail: "Preparando canal neural" },
   listening: { label: "OUVINDO", detail: "Pode falar comigo" },
   hearing: { label: "PROCESSANDO VOZ", detail: "Estou entendendo você" },
@@ -76,7 +78,7 @@ function MicIcon({ muted }: { muted: boolean }) {
 export default function Dashboard() {
   const [interactionMode, setInteractionMode] = useState<"voice" | "text">("voice");
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [muted, setMuted] = useState(true);
   const [microphoneMode, setMicrophoneMode] =
     useState<MicrophoneMode>("push_to_talk");
@@ -116,6 +118,7 @@ export default function Dashboard() {
   const latestUserTranscriptRef = useRef("");
   const pendingRoutineSourcesRef = useRef<RoutineSourceLink[]>([]);
   const connectionAttemptRef = useRef(0);
+  const activateMicrophoneAfterConnectRef = useRef(false);
   const voiceSelectionTimeoutRef = useRef<number | null>(null);
 
   const attachAnalyser = useCallback(
@@ -727,7 +730,14 @@ export default function Dashboard() {
     [executeHistorySearch, executePersonalityAssistant, executeRoutineAssistant, executeTaskAssistant, saveMessage],
   );
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (activateMicrophone = false) => {
+    if (activateMicrophone) {
+      activateMicrophoneAfterConnectRef.current = true;
+    }
+    if (connectedRef.current) {
+      if (activateMicrophone) setMicrophoneEnabled(true);
+      return;
+    }
     const connectionAttempt = ++connectionAttemptRef.current;
     setError("");
     setVoiceState("connecting");
@@ -794,8 +804,11 @@ export default function Dashboard() {
       const savedOpenMute =
         typeof window !== "undefined" &&
         window.localStorage.getItem(MUTE_STORAGE_KEY) === "true";
-      const initialMuted =
-        nextMicrophoneMode === "push_to_talk" ? true : savedOpenMute;
+      const initialMuted = activateMicrophoneAfterConnectRef.current
+        ? false
+        : nextMicrophoneMode === "push_to_talk"
+          ? true
+          : savedOpenMute;
       microphoneModeRef.current = nextMicrophoneMode;
       mutedRef.current = initialMuted;
       setMicrophoneMode(nextMicrophoneMode);
@@ -805,6 +818,7 @@ export default function Dashboard() {
       stream.getAudioTracks().forEach((track) => {
         track.enabled = !initialMuted;
       });
+      activateMicrophoneAfterConnectRef.current = false;
 
       const AudioContextClass = window.AudioContext;
       const context = new AudioContextClass();
@@ -838,17 +852,6 @@ export default function Dashboard() {
       channel.onopen = () => {
         connectedRef.current = true;
         setVoiceState(mutedRef.current ? "muted" : "listening");
-        if (typeof tokenData.startupBriefing === "string" && tokenData.startupBriefing) {
-          channel.send(
-            JSON.stringify({
-              type: "response.create",
-              response: {
-                output_modalities: ["audio"],
-                instructions: tokenData.startupBriefing,
-              },
-            }),
-          );
-        }
         window.setTimeout(() => {
           void fetch("/api/history/backfill", {
             method: "POST",
@@ -904,7 +907,30 @@ export default function Dashboard() {
   }, [attachAnalyser, handleRealtimeEvent, startMeter]);
 
   useEffect(() => {
-    const connectTimer = window.setTimeout(() => void connect(), 0);
+    let cancelled = false;
+    void fetch("/api/profile/personality", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.personality?.microphoneMode === "open"
+          ? ("open" as const)
+          : ("push_to_talk" as const);
+      })
+      .then((mode) => {
+        if (cancelled || !mode) return;
+        microphoneModeRef.current = mode;
+        setMicrophoneMode(mode);
+      })
+      .catch(() => {
+        // O modo recomendado continua disponível mesmo se o perfil não carregar.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const updateClock = () =>
       setClock(
         new Intl.DateTimeFormat("pt-BR", {
@@ -917,7 +943,6 @@ export default function Dashboard() {
     const clockTimer = window.setInterval(updateClock, 1000);
 
     return () => {
-      window.clearTimeout(connectTimer);
       window.clearInterval(clockTimer);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (continuitySyncTimerRef.current) {
@@ -932,10 +957,14 @@ export default function Dashboard() {
       peerRef.current?.close();
       void contextRef.current?.close();
     };
-  }, [connect]);
+  }, []);
 
   function toggleMute() {
     if (microphoneModeRef.current === "push_to_talk") return;
+    if (!connectedRef.current) {
+      void connect(true);
+      return;
+    }
     const next = !muted;
     setMuted(next);
     mutedRef.current = next;
@@ -966,12 +995,17 @@ export default function Dashboard() {
     ) {
       return;
     }
+    if (!connectedRef.current) {
+      void connect(true);
+      return;
+    }
     setMicrophoneEnabled(true);
   }
 
   function stopPushToTalk() {
     if (microphoneModeRef.current !== "push_to_talk") return;
-    setMicrophoneEnabled(false);
+    activateMicrophoneAfterConnectRef.current = false;
+    if (streamRef.current) setMicrophoneEnabled(false);
   }
 
   function stopVoice() {
@@ -987,6 +1021,17 @@ export default function Dashboard() {
     dataChannelRef.current = null;
     peerRef.current?.close();
     void contextRef.current?.close();
+    streamRef.current = null;
+    audioRef.current = null;
+    contextRef.current = null;
+    peerRef.current = null;
+    micAnalyserRef.current = null;
+    outputAnalyserRef.current = null;
+    activateMicrophoneAfterConnectRef.current = false;
+    setMuted(true);
+    mutedRef.current = true;
+    setEnergy(0.04);
+    setVoiceState("idle");
   }
 
   function changeInteractionMode(next: "voice" | "text") {
@@ -997,7 +1042,7 @@ export default function Dashboard() {
       return;
     }
     setInteractionMode("voice");
-    void connect();
+    setVoiceState("idle");
   }
 
   async function finalizeConversation() {
