@@ -29,6 +29,17 @@ type CalendarOption = {
   color: string | null;
 };
 
+type SyncResult = {
+  imported?: number;
+  updated?: number;
+  exported?: number;
+  unchanged?: number;
+  pending?: number;
+  partial?: boolean;
+  skipped?: boolean;
+  reason?: string;
+};
+
 async function jsonRequest<T>(url: string, init?: RequestInit) {
   const response = await fetch(url, { cache: "no-store", ...init });
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -43,6 +54,7 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const callbackHandled = useRef(false);
+  const previousSyncInProgress = useRef(false);
 
   const loadStatus = useCallback(async () => {
     const data = await jsonRequest<IntegrationStatus>(
@@ -64,18 +76,18 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
     setError("");
     setMessage("");
     try {
-      const data = await jsonRequest<{
-        result: {
-          imported?: number;
-          updated?: number;
-          exported?: number;
-          skipped?: boolean;
-          reason?: string;
-        };
-      }>("/api/integracoes/google-calendar/sincronizar", { method: "POST" });
+      const data = await jsonRequest<{ result: SyncResult }>(
+        "/api/integracoes/google-calendar/sincronizar",
+        { method: "POST" },
+      );
       const result = data.result;
       if (result.skipped) {
         setMessage("A agenda já está atualizada ou existe uma sincronização em andamento.");
+      } else if (result.partial) {
+        const pending = result.pending ?? 0;
+        setMessage(
+          `Sincronização parcial concluída: ${result.imported ?? 0} importados, ${result.updated ?? 0} atualizados e ${result.exported ?? 0} enviados. ${pending} item${pending === 1 ? " ficou" : " ficaram"} pendente${pending === 1 ? "" : "s"} para a próxima sincronização.`,
+        );
       } else {
         setMessage(
           `Sincronização concluída: ${result.imported ?? 0} importados, ${result.updated ?? 0} atualizados e ${result.exported ?? 0} enviados.`,
@@ -125,15 +137,37 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
         }
         if (!current.connected) return;
         await loadCalendars();
-        }).catch((reason) => {
-          if (active) setError(reason instanceof Error ? reason.message : "Falha ao carregar integração.");
-        });
+      }).catch((reason) => {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "Falha ao carregar integração.");
+        }
+      });
     }, 0);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
   }, [loadCalendars, loadStatus, synchronize]);
+
+  useEffect(() => {
+    if (!status?.connected || !status.syncInProgress) {
+      if (previousSyncInProgress.current && status?.connected) {
+        previousSyncInProgress.current = false;
+        setBusy("");
+        if (!status.lastSyncError) {
+          setMessage((current) => current || "Sincronização concluída.");
+          onSynced();
+        }
+      }
+      return;
+    }
+
+    previousSyncInProgress.current = true;
+    const interval = window.setInterval(() => {
+      void loadStatus().catch(() => undefined);
+    }, 3_000);
+    return () => window.clearInterval(interval);
+  }, [loadStatus, onSynced, status]);
 
   async function updateConfiguration(payload: {
     calendarId?: string;
@@ -265,13 +299,13 @@ export default function GoogleCalendarIntegration({ onSynced }: { onSynced: () =
                 timeStyle: "short",
               }).format(new Date(status.syncStartedAt))}`
             : status.syncInProgress
-            ? "Sincronização em andamento"
-            : status.lastSyncAt
-            ? `Última sincronização: ${new Intl.DateTimeFormat("pt-BR", {
-                dateStyle: "short",
-                timeStyle: "short",
-              }).format(new Date(status.lastSyncAt))}`
-            : "Ainda não sincronizado"}
+              ? "Sincronização em andamento"
+              : status.lastSyncAt
+                ? `Última sincronização: ${new Intl.DateTimeFormat("pt-BR", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  }).format(new Date(status.lastSyncAt))}`
+                : "Ainda não sincronizado"}
         </span>
         <div>
           <button onClick={() => void disconnect()} disabled={busy !== ""}>DESCONECTAR</button>
