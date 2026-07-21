@@ -67,11 +67,15 @@ type EventLink = {
   google_event_etag: string | null;
   google_event_updated_at: string | null;
   google_html_link: string | null;
+  last_synced_at: string | null;
 };
 
 const TASK_SELECT =
   "id, user_id, title, description, status, scheduled_at, due_at, all_day, timezone, recurrence_rule, updated_at, reminders(remind_at, status)";
-const SYNC_LOCK_TTL_MS = 10 * 60_000;
+const SYNC_LOCK_TTL_MS = 135_000;
+const SYNC_WORK_BUDGET_MS = 80_000;
+const EXPORT_BATCH_SIZE = 4;
+const MAX_EXPORTS_PER_RUN = 80;
 
 type SyncGoogleCalendarOptions = {
   force?: boolean;
@@ -120,9 +124,10 @@ function eventDates(event: GoogleEvent, fallbackTimeZone: string) {
     const exclusiveEnd = event.end?.date
       ? allDayStart(event.end.date, timeZone)
       : allDayStart(addDays(event.start.date, 1), timeZone);
-    const dueAt = new Date(exclusiveEnd).getTime() - 1_000 > new Date(scheduledAt).getTime()
-      ? new Date(new Date(exclusiveEnd).getTime() - 1_000).toISOString()
-      : null;
+    const dueAt =
+      new Date(exclusiveEnd).getTime() - 1_000 > new Date(scheduledAt).getTime()
+        ? new Date(new Date(exclusiveEnd).getTime() - 1_000).toISOString()
+        : null;
     return { scheduledAt, dueAt, allDay: true, timeZone };
   }
   const scheduledAt = event.start?.dateTime
@@ -204,6 +209,18 @@ async function saveEventLink({
   if (error) throw new GoogleCalendarError(error.message);
 }
 
+async function markCancelledLinkSynced(link: EventLink, event: GoogleEvent) {
+  const { error } = await createAdminClient()
+    .from("google_calendar_event_links")
+    .update({
+      google_event_etag: event.etag ?? link.google_event_etag,
+      google_event_updated_at: event.updated ?? link.google_event_updated_at,
+      last_synced_at: new Date().toISOString(),
+    })
+    .eq("id", link.id);
+  if (error) throw new GoogleCalendarError(error.message);
+}
+
 export async function listGoogleCalendars(userId: string) {
   const calendars: GoogleCalendarEntry[] = [];
   let pageToken = "";
@@ -230,37 +247,40 @@ export async function listGoogleCalendars(userId: string) {
     .sort((a, b) => Number(b.primary) - Number(a.primary) || a.name.localeCompare(b.name));
 }
 
-export async function syncTaskToGoogle(userId: string, taskId: string, force = false) {
-  const integration = await getGoogleCalendarIntegration(userId);
-  if (!integration) return { skipped: true };
-  if (
-    (!integration.sync_enabled && !force) ||
-    integration.sync_direction === "google_to_synapsay"
-  ) {
-    return { skipped: true };
+async function deleteGoogleEventLink(userId: string, link: EventLink) {
+  try {
+    await googleCalendarFetch<null>({
+      userId,
+      path: `/calendars/${encodePath(link.calendar_id)}/events/${encodePath(link.google_event_id)}?sendUpdates=none`,
+      method: "DELETE",
+    });
+  } catch (reason) {
+    if (!(reason instanceof GoogleCalendarError) || reason.status !== 404) throw reason;
   }
+  const { error } = await createAdminClient()
+    .from("google_calendar_event_links")
+    .delete()
+    .eq("id", link.id);
+  if (error) throw new GoogleCalendarError(error.message);
+}
 
-  const admin = createAdminClient();
-  const [{ data: task, error: taskError }, { data: existingLink }] = await Promise.all([
-    admin.from("tasks").select(TASK_SELECT).eq("id", taskId).eq("user_id", userId).maybeSingle(),
-    admin
-      .from("google_calendar_event_links")
-      .select("*")
-      .eq("task_id", taskId)
-      .eq("user_id", userId)
-      .maybeSingle(),
-  ]);
-  if (taskError) throw new GoogleCalendarError(taskError.message);
-  if (!task) return { skipped: true };
-  const typedTask = task as TaskForGoogle;
-  const link = existingLink as EventLink | null;
-
-  if (typedTask.status === "cancelled") {
+async function syncTaskWithContext({
+  userId,
+  integration,
+  task,
+  link,
+}: {
+  userId: string;
+  integration: GoogleCalendarIntegration;
+  task: TaskForGoogle;
+  link: EventLink | null;
+}) {
+  if (task.status === "cancelled") {
     if (link) await deleteGoogleEventLink(userId, link);
     return { deleted: Boolean(link) };
   }
-  if (typedTask.status === "completed") return { skipped: true };
-  const body = taskAsGoogleEvent(typedTask);
+  if (task.status === "completed") return { skipped: true };
+  const body = taskAsGoogleEvent(task);
   if (!body) return { skipped: true };
 
   let event: GoogleEvent;
@@ -274,7 +294,7 @@ export async function syncTaskToGoogle(userId: string, taskId: string, force = f
       });
     } catch (reason) {
       if (!(reason instanceof GoogleCalendarError) || reason.status !== 404) throw reason;
-      await admin.from("google_calendar_event_links").delete().eq("id", link.id);
+      await createAdminClient().from("google_calendar_event_links").delete().eq("id", link.id);
       event = await googleCalendarFetch<GoogleEvent>({
         userId,
         path: `/calendars/${encodePath(integration.selected_calendar_id)}/events?sendUpdates=none`,
@@ -292,35 +312,55 @@ export async function syncTaskToGoogle(userId: string, taskId: string, force = f
   }
   await saveEventLink({
     userId,
-    taskId,
+    taskId: task.id,
     calendarId: link?.calendar_id ?? integration.selected_calendar_id,
     event,
   });
   return { eventId: event.id, htmlLink: event.htmlLink ?? null };
 }
 
-async function deleteGoogleEventLink(userId: string, link: EventLink) {
-  try {
-    await googleCalendarFetch<null>({
-      userId,
-      path: `/calendars/${encodePath(link.calendar_id)}/events/${encodePath(link.google_event_id)}?sendUpdates=none`,
-      method: "DELETE",
-    });
-  } catch (reason) {
-    if (!(reason instanceof GoogleCalendarError) || reason.status !== 404) throw reason;
+export async function syncTaskToGoogle(userId: string, taskId: string, force = false) {
+  const integration = await getGoogleCalendarIntegration(userId);
+  if (!integration) return { skipped: true };
+  if (
+    (!integration.sync_enabled && !force) ||
+    integration.sync_direction === "google_to_synapsay"
+  ) {
+    return { skipped: true };
   }
-  await createAdminClient().from("google_calendar_event_links").delete().eq("id", link.id);
+
+  const admin = createAdminClient();
+  const [{ data: task, error: taskError }, { data: existingLink, error: linkError }] =
+    await Promise.all([
+      admin.from("tasks").select(TASK_SELECT).eq("id", taskId).eq("user_id", userId).maybeSingle(),
+      admin
+        .from("google_calendar_event_links")
+        .select("*")
+        .eq("task_id", taskId)
+        .eq("user_id", userId)
+        .maybeSingle(),
+    ]);
+  if (taskError) throw new GoogleCalendarError(taskError.message);
+  if (linkError) throw new GoogleCalendarError(linkError.message);
+  if (!task) return { skipped: true };
+  return syncTaskWithContext({
+    userId,
+    integration,
+    task: task as TaskForGoogle,
+    link: (existingLink as EventLink | null) ?? null,
+  });
 }
 
 export async function deleteTaskFromGoogle(userId: string, taskId: string) {
   const integration = await getGoogleCalendarIntegration(userId);
   if (!integration?.sync_enabled || integration.sync_direction === "google_to_synapsay") return;
-  const { data } = await createAdminClient()
+  const { data, error } = await createAdminClient()
     .from("google_calendar_event_links")
     .select("*")
     .eq("task_id", taskId)
     .eq("user_id", userId)
     .maybeSingle();
+  if (error) throw new GoogleCalendarError(error.message);
   if (data) await deleteGoogleEventLink(userId, data as EventLink);
 }
 
@@ -383,12 +423,14 @@ async function importGoogleEvents({
   calendarTimezone,
   lastSyncAt,
   syncStartedAt,
+  deadline,
 }: {
   userId: string;
   calendarId: string;
   calendarTimezone: string;
   lastSyncAt: string | null;
   syncStartedAt: string;
+  deadline: number;
 }) {
   const admin = createAdminClient();
   const channel = await eventSyncState(userId, calendarId);
@@ -406,6 +448,7 @@ async function importGoogleEvents({
     }
     changes = await listChangedEvents({ userId, calendarId, syncToken: null, lastSyncAt: null });
   }
+
   const events = changes.events;
   const { data: linksData, error: linksError } = await admin
     .from("google_calendar_event_links")
@@ -416,31 +459,57 @@ async function importGoogleEvents({
   const linkByEvent = new Map(
     ((linksData ?? []) as EventLink[]).map((link) => [link.google_event_id, link]),
   );
+
   let imported = 0;
   let updated = 0;
   let cancelled = 0;
+  let unchanged = 0;
+  let processed = 0;
 
   for (const event of events) {
+    if (Date.now() >= deadline) break;
     const link = linkByEvent.get(event.id);
+    const alreadySynced = Boolean(
+      link &&
+        ((event.etag && link.google_event_etag === event.etag) ||
+          (event.updated && link.google_event_updated_at === event.updated)),
+    );
+    if (alreadySynced) {
+      unchanged += 1;
+      processed += 1;
+      continue;
+    }
+
     if (event.status === "cancelled") {
       if (link) {
-        await admin
+        const { error: taskError } = await admin
           .from("tasks")
           .update({ status: "cancelled", completed_at: null })
           .eq("id", link.task_id)
           .eq("user_id", userId);
-        await admin
+        if (taskError) throw new GoogleCalendarError(taskError.message);
+        const { error: reminderError } = await admin
           .from("reminders")
           .update({ status: "cancelled" })
           .eq("task_id", link.task_id)
           .eq("status", "scheduled");
+        if (reminderError) throw new GoogleCalendarError(reminderError.message);
+        await markCancelledLinkSynced(link, event);
         cancelled += 1;
       }
+      processed += 1;
       continue;
     }
-    if (["birthday", "workingLocation"].includes(event.eventType ?? "")) continue;
+    if (["birthday", "workingLocation"].includes(event.eventType ?? "")) {
+      processed += 1;
+      continue;
+    }
+
     const dates = eventDates(event, calendarTimezone);
-    if (!dates.scheduledAt) continue;
+    if (!dates.scheduledAt) {
+      processed += 1;
+      continue;
+    }
     const title = (event.summary?.trim() || "Evento sem título").slice(0, 160);
     const description = [event.description?.trim(), event.location ? `Local: ${event.location}` : ""]
       .filter(Boolean)
@@ -449,12 +518,13 @@ async function importGoogleEvents({
 
     let taskId = link?.task_id ?? event.extendedProperties?.private?.synapsayTaskId;
     if (taskId && !link) {
-      const { data: ownedTask } = await admin
+      const { data: ownedTask, error: ownedTaskError } = await admin
         .from("tasks")
         .select("id")
         .eq("id", taskId)
         .eq("user_id", userId)
         .maybeSingle();
+      if (ownedTaskError) throw new GoogleCalendarError(ownedTaskError.message);
       if (!ownedTask) taskId = undefined;
     }
 
@@ -488,7 +558,9 @@ async function importGoogleEvents({
         })
         .select("id")
         .single();
-      if (error || !created) throw new GoogleCalendarError(error?.message ?? "Falha ao importar evento.");
+      if (error || !created) {
+        throw new GoogleCalendarError(error?.message ?? "Falha ao importar evento.");
+      }
       taskId = created.id;
       imported += 1;
     }
@@ -500,38 +572,98 @@ async function importGoogleEvents({
       const remindAt = new Date(
         new Date(dates.scheduledAt).getTime() - override.minutes * 60_000,
       ).toISOString();
-      await admin.from("reminders").upsert(
+      const { error: reminderError } = await admin.from("reminders").upsert(
         { task_id: taskId, user_id: userId, remind_at: remindAt, channel: "browser" },
         { onConflict: "task_id,remind_at,channel", ignoreDuplicates: true },
       );
+      if (reminderError) throw new GoogleCalendarError(reminderError.message);
     }
     await saveEventLink({ userId, taskId: taskId!, calendarId, event });
+    processed += 1;
   }
-  if (channel && changes.nextSyncToken) {
+
+  const complete = processed >= events.length;
+  if (complete && channel && changes.nextSyncToken) {
     await saveEventSyncToken({ channel, syncToken: changes.nextSyncToken, syncStartedAt });
   }
-  return { received: events.length, imported, updated, cancelled };
+  return {
+    received: events.length,
+    imported,
+    updated,
+    cancelled,
+    unchanged,
+    complete,
+    pending: Math.max(0, events.length - processed),
+  };
 }
 
-async function exportSynapsayTasks(userId: string, lastSyncAt: string | null) {
+function taskNeedsExport(task: TaskForGoogle, link: EventLink | undefined) {
+  if (!link) return true;
+  if (!link.last_synced_at) return true;
+  return new Date(task.updated_at).getTime() > new Date(link.last_synced_at).getTime() + 1_000;
+}
+
+async function exportSynapsayTasks({
+  userId,
+  integration,
+  lastSyncAt,
+  deadline,
+}: {
+  userId: string;
+  integration: GoogleCalendarIntegration;
+  lastSyncAt: string | null;
+  deadline: number;
+}) {
   const admin = createAdminClient();
   let query = admin
     .from("tasks")
     .select(TASK_SELECT)
     .eq("user_id", userId)
-    .in("status", ["pending", "in_progress"])
+    .in("status", ["pending", "in_progress", "cancelled"])
     .or("scheduled_at.not.is.null,due_at.not.is.null")
     .order("updated_at", { ascending: true })
     .limit(500);
   if (lastSyncAt) query = query.gte("updated_at", lastSyncAt);
   const { data, error } = await query;
   if (error) throw new GoogleCalendarError(error.message);
+  const tasks = (data ?? []) as TaskForGoogle[];
+  if (!tasks.length) return { exported: 0, unchanged: 0, pending: 0, complete: true };
+
+  const { data: linksData, error: linksError } = await admin
+    .from("google_calendar_event_links")
+    .select("*")
+    .eq("user_id", userId)
+    .in("task_id", tasks.map((task) => task.id));
+  if (linksError) throw new GoogleCalendarError(linksError.message);
+  const links = new Map(((linksData ?? []) as EventLink[]).map((link) => [link.task_id, link]));
+  const changed = tasks.filter((task) => taskNeedsExport(task, links.get(task.id)));
+  const unchanged = tasks.length - changed.length;
+  const queue = changed.slice(0, MAX_EXPORTS_PER_RUN);
   let exported = 0;
-  for (const task of (data ?? []) as TaskForGoogle[]) {
-    await syncTaskToGoogle(userId, task.id, true);
-    exported += 1;
+  let processed = 0;
+
+  for (let index = 0; index < queue.length; index += EXPORT_BATCH_SIZE) {
+    if (Date.now() >= deadline) break;
+    const batch = queue.slice(index, index + EXPORT_BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((task) =>
+        syncTaskWithContext({
+          userId,
+          integration,
+          task,
+          link: links.get(task.id) ?? null,
+        }),
+      ),
+    );
+    for (const result of results) {
+      processed += 1;
+      if (result.status === "rejected") throw result.reason;
+      if (!("skipped" in result.value) || !result.value.skipped) exported += 1;
+    }
   }
-  return exported;
+
+  const pending = Math.max(0, changed.length - processed);
+  return { exported, unchanged, pending, complete: pending === 0 };
 }
 
 function normalizeSyncOptions(options: boolean | SyncGoogleCalendarOptions = {}) {
@@ -641,29 +773,61 @@ export async function syncGoogleCalendarForUser(
     return { skipped: true, reason: "recent_sync", syncedAt: lock.integration.last_sync_at };
   }
 
+  const deadline = Date.now() + SYNC_WORK_BUDGET_MS;
   try {
     await ensureGoogleCalendarWatches(userId, lock.integration).catch((reason) => {
       console.warn("Notificações do Google Agenda não configuradas:", reason);
     });
-    const exported =
+
+    const exportResult =
       lock.integration.sync_direction === "google_to_synapsay"
-        ? 0
-        : await exportSynapsayTasks(userId, lock.integration.last_sync_at);
+        ? { exported: 0, unchanged: 0, pending: 0, complete: true }
+        : await exportSynapsayTasks({
+            userId,
+            integration: lock.integration,
+            lastSyncAt: lock.integration.last_sync_at,
+            deadline,
+          });
+
     const pull =
       lock.integration.sync_direction === "synapsay_to_google"
-        ? { received: 0, imported: 0, updated: 0, cancelled: 0 }
+        ? {
+            received: 0,
+            imported: 0,
+            updated: 0,
+            cancelled: 0,
+            unchanged: 0,
+            pending: 0,
+            complete: true,
+          }
         : await importGoogleEvents({
             userId,
             calendarId: lock.integration.selected_calendar_id,
             calendarTimezone: lock.integration.selected_calendar_timezone,
             lastSyncAt: lock.integration.last_sync_at,
             syncStartedAt: lock.startedAt,
+            deadline,
           });
-    await releaseSyncLock({ userId, token: lock.token, lastSyncAt: lock.startedAt });
-    return { ...pull, exported, syncedAt: lock.startedAt };
+
+    const complete = exportResult.complete && pull.complete;
+    await releaseSyncLock({
+      userId,
+      token: lock.token,
+      lastSyncAt: complete ? lock.startedAt : undefined,
+    });
+    return {
+      ...pull,
+      exported: exportResult.exported,
+      unchanged: pull.unchanged + exportResult.unchanged,
+      pending: pull.pending + exportResult.pending,
+      partial: !complete,
+      syncedAt: complete ? lock.startedAt : lock.integration.last_sync_at,
+    };
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : "Falha ao sincronizar agendas.";
-    await releaseSyncLock({ userId, token: lock.token, errorMessage: message });
+    await releaseSyncLock({ userId, token: lock.token, errorMessage: message }).catch((releaseError) => {
+      console.error("Falha ao liberar bloqueio da sincronização do Google Agenda:", releaseError);
+    });
     throw reason;
   }
 }
