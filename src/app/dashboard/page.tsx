@@ -119,6 +119,7 @@ export default function Dashboard() {
   const pendingRoutineSourcesRef = useRef<RoutineSourceLink[]>([]);
   const connectionAttemptRef = useRef(0);
   const activateMicrophoneAfterConnectRef = useRef(false);
+  const spacePressedRef = useRef(false);
   const voiceSelectionTimeoutRef = useRef<number | null>(null);
 
   const attachAnalyser = useCallback(
@@ -156,6 +157,17 @@ export default function Dashboard() {
       frameRef.current = requestAnimationFrame(tick);
     };
     frameRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const setMicrophoneEnabled = useCallback((enabled: boolean) => {
+    const nextMuted = !enabled;
+    setMuted(nextMuted);
+    mutedRef.current = nextMuted;
+    streamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+    setVoiceState(nextMuted ? "muted" : "listening");
+    setEnergy(nextMuted ? 0.04 : 0.08);
   }, []);
 
   const ensureConversation = useCallback(async (channel: "voice" | "text" = "voice") => {
@@ -916,7 +928,7 @@ export default function Dashboard() {
       setError(message);
       setVoiceState("error");
     }
-  }, [attachAnalyser, handleRealtimeEvent, startMeter]);
+  }, [attachAnalyser, handleRealtimeEvent, setMicrophoneEnabled, startMeter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -988,18 +1000,7 @@ export default function Dashboard() {
     setEnergy(next ? 0.04 : 0.08);
   }
 
-  function setMicrophoneEnabled(enabled: boolean) {
-    const nextMuted = !enabled;
-    setMuted(nextMuted);
-    mutedRef.current = nextMuted;
-    streamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = enabled;
-    });
-    setVoiceState(nextMuted ? "muted" : "listening");
-    setEnergy(nextMuted ? 0.04 : 0.08);
-  }
-
-  function startPushToTalk() {
+  const startPushToTalk = useCallback(() => {
     if (
       microphoneModeRef.current !== "push_to_talk" ||
       voiceState === "connecting" ||
@@ -1012,13 +1013,58 @@ export default function Dashboard() {
       return;
     }
     setMicrophoneEnabled(true);
-  }
+  }, [connect, setMicrophoneEnabled, voiceState]);
 
-  function stopPushToTalk() {
+  const stopPushToTalk = useCallback(() => {
     if (microphoneModeRef.current !== "push_to_talk") return;
     activateMicrophoneAfterConnectRef.current = false;
     if (streamRef.current) setMicrophoneEnabled(false);
-  }
+  }, [setMicrophoneEnabled]);
+
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      const element = target instanceof HTMLElement ? target : null;
+      return Boolean(
+        element?.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(element?.tagName ?? ""),
+      );
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.code !== "Space" ||
+        event.repeat ||
+        microphoneModeRef.current !== "push_to_talk" ||
+        isTypingTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      spacePressedRef.current = true;
+      startPushToTalk();
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || !spacePressedRef.current) return;
+      event.preventDefault();
+      spacePressedRef.current = false;
+      stopPushToTalk();
+    };
+    const releaseSpace = () => {
+      if (!spacePressedRef.current) return;
+      spacePressedRef.current = false;
+      stopPushToTalk();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", releaseSpace);
+    document.addEventListener("visibilitychange", releaseSpace);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", releaseSpace);
+      document.removeEventListener("visibilitychange", releaseSpace);
+    };
+  }, [microphoneMode, startPushToTalk, stopPushToTalk, voiceState]);
 
   function stopVoice() {
     connectionAttemptRef.current += 1;
@@ -1236,10 +1282,28 @@ export default function Dashboard() {
           <button
             className={`${styles.micButton} ${muted ? styles.isMuted : ""}`}
             onClick={microphoneMode === "open" ? toggleMute : undefined}
-            onPointerDown={microphoneMode === "push_to_talk" ? startPushToTalk : undefined}
-            onPointerUp={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
+            onPointerDown={
+              microphoneMode === "push_to_talk"
+                ? (event) => {
+                    event.preventDefault();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    startPushToTalk();
+                  }
+                : undefined
+            }
+            onPointerUp={
+              microphoneMode === "push_to_talk"
+                ? (event) => {
+                    event.preventDefault();
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
+                    stopPushToTalk();
+                  }
+                : undefined
+            }
             onPointerCancel={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
-            onPointerLeave={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
+            onLostPointerCapture={microphoneMode === "push_to_talk" ? stopPushToTalk : undefined}
             onKeyDown={(event) => {
               if (
                 microphoneMode === "push_to_talk" &&
