@@ -14,6 +14,15 @@ const UUID_PATTERN =
 const TASK_SELECT =
   "id, title, description, status, priority, scheduled_at, due_at, all_day, timezone, recurrence_rule, created_by, completed_at, conversation_id, created_at, updated_at, reminders(id, task_id, remind_at, channel, status, delivered_at, dismissed_at)";
 
+function requiresGoogleSync(body: Record<string, unknown>) {
+  const eventFields = ["title", "description", "scheduledAt", "dueAt", "allDay", "reminderAt"];
+  if (eventFields.some((field) => body[field] !== undefined)) return true;
+
+  // O Google Agenda não possui status de concluída/incompleta. Somente cancelamento
+  // precisa ser refletido externamente, removendo o evento vinculado.
+  return body.status === "cancelled";
+}
+
 export async function PATCH(request: Request, context: RouteContext<"/api/tasks/[id]">) {
   const { id } = await context.params;
   if (!UUID_PATTERN.test(id)) {
@@ -132,7 +141,10 @@ export async function PATCH(request: Request, context: RouteContext<"/api/tasks/
     .eq("user_id", userId)
     .maybeSingle();
   let googleSyncWarning: string | null = null;
-  if (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (
+    requiresGoogleSync(body) &&
+    (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
+  ) {
     try {
       await syncTaskToGoogle(userId, id);
     } catch (reason) {
