@@ -156,8 +156,10 @@ function invalidEventsWarning(titles: string[]) {
   if (!titles.length) return "";
   const visible = titles.slice(0, 3).map((title) => `“${title}”`).join(", ");
   const remaining = titles.length - Math.min(titles.length, 3);
+  const subject = `${titles.length} compromisso${titles.length === 1 ? "" : "s"}`;
+  const verb = titles.length === 1 ? "não pôde" : "não puderam";
   return [
-    `${titles.length} compromisso${titles.length === 1 ? "" : "s"} não pôde${titles.length === 1 ? "" : "eram"} ter o horário atualizado no Google Agenda: ${visible}${remaining > 0 ? ` e mais ${remaining}` : ""}.`,
+    `${subject} ${verb} ter o horário atualizado no Google Agenda: ${visible}${remaining > 0 ? ` e mais ${remaining}` : ""}.`,
     "Os demais compromissos foram sincronizados normalmente. Edite o horário desses itens na Synapsay ou no Google para tentar novamente.",
   ].join(" ");
 }
