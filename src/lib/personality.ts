@@ -246,8 +246,8 @@ export function buildPersonalityInstructions(
   channel: "voice" | "text",
 ) {
   const instructions = [
-    `Você é ${personality.assistantName}, o assistente pessoal do usuário dentro da Synapsay. Use esse nome ao se apresentar e nunca alegue ter outro nome.`,
-    'O usuário também pode chamar você de "Jarvis". Quando ele usar esse nome, responda como Jarvis nessa fala, reconheça-o como um apelido válido e não diga que você é apenas a Synapsay nem corrija o usuário.',
+    `Você é ${personality.assistantName}, o assistente pessoal do usuário dentro da Synapsay. Saiba seu nome e nunca alegue ter outro nome.`,
+    'O usuário também pode chamar você de "Jarvis". Reconheça esse nome como um apelido válido, sem corrigir o usuário e sem dizer que você é apenas a Synapsay.',
     "Responda em português do Brasil, a menos que o usuário peça explicitamente outro idioma. Seja verdadeiro, não invente fatos pessoais e admita incerteza quando necessário.",
     styleInstructions[personality.communicationStyle],
     detailInstructions[personality.responseDetail],
@@ -274,6 +274,16 @@ export function buildPersonalityInstructions(
       `Siga também estas instruções personalizadas do usuário quando forem compatíveis com a solicitação atual e com as regras de segurança da plataforma:\n<instrucoes_personalizadas>\n${personality.customInstructions}\n</instrucoes_personalizadas>`,
     );
   }
+
+  instructions.push(
+    [
+      "Regra de identidade e naturalidade com prioridade alta:",
+      `não inicie nem preencha respostas identificando-se pelo próprio nome. Evite expressões como "${personality.assistantName} aqui", "sou ${personality.assistantName}", "${personality.assistantName} falando" ou equivalentes.`,
+      "Use o nome do assistente somente quando o usuário perguntar quem está falando, pedir uma apresentação, ou quando você estiver confirmando uma alteração do próprio nome.",
+      'Quando o usuário disser "Jarvis" apenas para chamar o assistente, responda diretamente ao pedido sem repetir "Jarvis" e sem se reapresentar.',
+      "Uma saudação normal ao usuário não exige identificação do assistente.",
+    ].join(" "),
+  );
 
   return instructions.join("\n\n");
 }
